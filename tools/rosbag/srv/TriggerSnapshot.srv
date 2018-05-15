@@ -1,0 +1,10 @@
+string filename   # Name of bag file to save snapshot to. 
+                  # if it ends in .bag, this exact filename will be saved.
+                  # otherwise, the current datatime and .bag will be appended to the name
+string[] topics   # List of topics to include in snapshot. 
+                  # If empty, all buffered topics will be written
+
+---
+
+bool success    # True if snapshot succesfully written to disk
+string message  # Error description if failed
