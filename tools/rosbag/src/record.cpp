@@ -66,9 +66,10 @@ rosbag::RecorderOptions parseOptions(int argc, char** argv) {
       ("topic", po::value< std::vector<std::string> >(), "topic to record")
       ("size", po::value<uint64_t>(), "The maximum size of the bag to record in MB.")
       ("duration", po::value<std::string>(), "Record a bag of maximum duration in seconds, unless 'm', or 'h' is appended.")
+      ("trigger,t", "Trigger snapshot recording")
+      ("snapshot,s", "Enable snapshot recording (don't write to file unless triggered)")
       ("node", po::value<std::string>(), "Record all topics subscribed to by a specific node.");
 
-  
     po::positional_options_description p;
     p.add("topic", -1);
     
@@ -94,6 +95,10 @@ rosbag::RecorderOptions parseOptions(int argc, char** argv) {
       opts.record_all = true;
     if (vm.count("regex"))
       opts.regex = true;
+    if (vm.count("trigger"))
+      opts.trigger = true;
+    if (vm.count("snapshot"))
+      opts.snapshot = true;
     if (vm.count("exclude"))
     {
       opts.do_exclude = true;

@@ -93,6 +93,8 @@ def record_cmd(argv):
     parser.add_option(      "--node",          dest="node",          default=None,  type='string',action="store", help="record all topics subscribed to by a specific node")
     parser.add_option("-j", "--bz2",           dest="compression",   default=None,  action="store_const", const='bz2', help="use BZ2 compression")
     parser.add_option("--lz4",                 dest="compression",                  action="store_const", const='lz4', help="use LZ4 compression")
+    parser.add_option("-t", "--trigger",       dest="trigger",                      action="store_true",          help="Trigger snapshot recording")
+    parser.add_option("-s", "--snapshot",      dest="snapshot",                     action="store_true",          help="Enable snapshot recording (don't write to file unless triggered)")
 
     (options, args) = parser.parse_args(argv)
 
@@ -116,6 +118,8 @@ def record_cmd(argv):
     if options.name:          cmd.extend(["-O", options.name])
     if options.exclude_regex: cmd.extend(["--exclude", options.exclude_regex])
     if options.all:           cmd.extend(["--all"])
+    if options.trigger:       cmd.extend(['--trigger'])
+    if options.snapshot:      cmd.extend(['--snapshot'])
     if options.regex:         cmd.extend(["--regex"])
     if options.compression:   cmd.extend(["--%s" % options.compression])
     if options.split:
