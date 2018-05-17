@@ -34,7 +34,7 @@
 #ifndef ROSBAG_SNAPSHOTER_H
 #define ROSBAG_SNAPSHOTER_H
 
-#include <queue>
+#include <deque>
 #include <map>
 #include <string>
 #include <boost/atomic.hpp>
@@ -127,22 +127,27 @@ public:
     SnapshotMessage pop();
     // Returns the time difference between back and front of queue, or 0 if size <= 1
     ros::Duration duration() const;
+    // Clear internal buffer
+    void clear();
+    // Write all buffered contents to bag file
+    void write(Bag& bag);
     // Store the subscriber for this topic's queue internaly so it is not deleted
     void setSubscriber(boost::shared_ptr<ros::Subscriber> sub);
 private:
     boost::mutex lock;
     SnapshoterTopicOptions options_;
+    // Current total size of the queue
+    int64_t size_;
+    std::deque<SnapshotMessage> queue_;
+    // Subscriber to the callback which uses this queue
+    boost::shared_ptr<ros::Subscriber> sub_;
+
     // Internal push whitch does not obtain lock
     void _push(SnapshotMessage const& msg);
     // Internal pop whitch does not obtain lock
     SnapshotMessage _pop();
-    // Current total size of the queue
-    int64_t size_;
-    std::queue<SnapshotMessage> queue_;
-    // Subscriber to the callback which uses this queue
-    boost::shared_ptr<ros::Subscriber> sub_;
     // Truncate front of queue as needed to fit a new message of specified size and time. Returns False if this is impossible.
-    bool prepare_push(int32_t size, ros::Time const& time);
+    bool preparePush(int32_t size, ros::Time const& time);
 };
 
 
@@ -172,6 +177,7 @@ private:
     ros::NodeHandle nh_;
     ros::ServiceServer trigger_snapshot_server_;
     ros::ServiceServer enable_server_;
+    ros::Publisher status_pub_;
 
     // Replace individual topic limits with node defaults if they are flagged for it (see SnapshoterTopicOptions)
     void fixTopicOptions(SnapshoterTopicOptions &options);
@@ -179,6 +185,8 @@ private:
     bool postfixFilename(std::string& file);
     // TODO 
     std::string timeAsStr();
+    // Clear the internal buffers of all topics. Used when resuming after a pause to avoid time gaps
+    void clear();
     // Subscribe to one of the topics, setting up the callback to add to the respective queue
     void subscribe(std::string const& topic, boost::shared_ptr<MessageQueue> queue);
     // Called on new message from any configured topic. Adds to queue for that topic

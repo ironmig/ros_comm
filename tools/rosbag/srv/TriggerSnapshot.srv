@@ -7,4 +7,6 @@ string[] topics   # List of topics to include in snapshot.
 ---
 
 bool success    # True if snapshot succesfully written to disk
+
+string NO_DATA=no messages buffered on selected topics
 string message  # Error description if failed

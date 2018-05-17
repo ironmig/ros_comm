@@ -1,0 +1,9 @@
+<launch>
+  <node name="snapshot" pkg="rosbag" type="rosbag" args="snapshot"/>
+  <node name="test1pub" pkg="rostopic" type="rostopic" args="pub /test1 std_msgs/Bool 'data: true' -r100"/>
+  <node name="test2pub" pkg="rostopic" type="rostopic" args="pub /test2 std_msgs/Int32 'data: 1337' -r100"/>
+  <test test-name="snapshot_test" pkg="test_rosbag" type="test_snapshot.py">
+    <rosparam>
+    </rosparam>
+  </test>
+</launch>

@@ -40,6 +40,7 @@
 #include <ros/ros.h>
 #include <ros/assert.h>
 #include <topic_tools/shape_shifter.h>
+#include <rosbag/SnapshotStatus.h>
 #include "rosbag/snapshoter.h"
 
 
@@ -86,6 +87,13 @@ void MessageQueue::setSubscriber(shared_ptr<ros::Subscriber> sub)
     sub_ = sub;
 }
 
+void MessageQueue::clear()
+{
+    boost::mutex::scoped_lock l(lock);
+    queue_.clear();
+    size_ = 0;
+}
+
 ros::Duration MessageQueue::duration() const
 {
     // No duration if 0 or 1 messages
@@ -93,7 +101,7 @@ ros::Duration MessageQueue::duration() const
     return queue_.back().time - queue_.front().time;
 }
 
-bool MessageQueue::prepare_push(int32_t size, ros::Time const& time)
+bool MessageQueue::preparePush(int32_t size, ros::Time const& time)
 {
     // The only case where message cannot be addded is if size is greater than limit
     if (options_.memory_limit_ != SnapshoterTopicOptions::NO_MEMORY_LIMIT && size > options_.memory_limit_)
@@ -135,15 +143,15 @@ SnapshotMessage MessageQueue::pop()
 }
 void MessageQueue::_push(SnapshotMessage const& _out)
 {
-    // TODO: remove debug print of switch to ROS_DEBUG log
-    ROS_INFO("Queue Status SIZE=%ld DURATION=%f MSG_COUNT=%lu DURATION_LIMIT=%f BUFFER_LIMIT=%d", size_, duration().toSec(), queue_.size(),
-        options_.duration_limit_.toSec(), options_.memory_limit_);
+    // TODO: remove dead code
+    //ROS_INFO("Queue Status SIZE=%ld DURATION=%f MSG_COUNT=%lu DURATION_LIMIT=%f BUFFER_LIMIT=%d", size_, duration().toSec(), queue_.size(),
+    //    options_.duration_limit_.toSec(), options_.memory_limit_);
 
     int32_t size = _out.msg->size();
     // If message cannot be added without violating limits, it must be dropped
-    if (not prepare_push(size, _out.time))
+    if (not preparePush(size, _out.time))
         return;
-    queue_.push(_out);
+    queue_.push_back(_out);
     // Add size of new message to running count to maintain correctness
     size_ += _out.msg->size();
 }
@@ -151,7 +159,7 @@ void MessageQueue::_push(SnapshotMessage const& _out)
 SnapshotMessage MessageQueue::_pop()
 {
     SnapshotMessage tmp = queue_.front();
-    queue_.pop();
+    queue_.pop_front();
     //  Remove size of popped message to maintain correctness of size_
     size_ -= tmp.msg->size();
     return tmp;
@@ -162,8 +170,7 @@ const int Snapshoter::QUEUE_SIZE = 10;
 
 Snapshoter::Snapshoter(SnapshoterOptions const& options) : options_(options), recording_(true), writing_(false)
 {
-    trigger_snapshot_server_ = nh_.advertiseService("trigger_snapshot", &Snapshoter::triggerSnapshotCb, this);
-    enable_server_ = nh_.advertiseService("record", &Snapshoter::recordCb, this);
+    status_pub_ = nh_.advertise<rosbag::SnapshotStatus>("status", 10);
 }
 
 void Snapshoter::fixTopicOptions(SnapshoterTopicOptions &options)
@@ -208,7 +215,6 @@ void Snapshoter::topicCB(const ros::MessageEvent<topic_tools::ShapeShifter const
         boost::shared_lock<boost::upgrade_mutex> lock(state_lock_);
         if(!recording_)
         {
-            ROS_INFO("NOT RECORDING, skipping");
             return;
         }
     }
@@ -259,9 +265,14 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
     }
 
     // Ensure that state is updated when function exits, regardlesss of branch path / exception events
-    BOOST_SCOPE_EXIT(&state_lock_, &writing_, &recording_, recording_prior) {
+    BOOST_SCOPE_EXIT(&state_lock_, &writing_, &recording_, recording_prior, this_) {
+        // Clear buffers beacuase time gaps (skipped messages) may have occured while paused
+        this_->clear();
         boost::unique_lock<boost::upgrade_mutex> write_lock(state_lock_);
+        // Turn off writing flag and return recording to its state before writing
         writing_ = false;
+        if (recording_prior)
+            ROS_INFO("Buffering resumed");
         recording_ = recording_prior;
     } BOOST_SCOPE_EXIT_END
 
@@ -269,71 +280,117 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
     Bag bag;
 
     // Write each selected topic's queue to bag file
-    // TODO: if req.topics.size() == 0, do ALL topics
     // TODO: implement specific times to save
     // TODO: write to bag in time order, not by topic (if this matters for playback correctness / speed)
     bool valid = false;
-    BOOST_FOREACH(std::string topic, req.topics)
+    // If specific topics specified, write only those
+    if (req.topics.size())
     {
-        // Resolve and clean topic
-        try
+        BOOST_FOREACH(std::string& topic, req.topics)
         {
-            topic = ros::names::resolve(nh_.getNamespace(), topic);
-        }
-        catch (ros::InvalidNameException const& err)
-        {
-            // TODO: just skip this topic instead of stopping whole write
-            res.message = string("Invalid name ") + err.what();
-            return true;
-        }
-
-        // Find the message queue for this topic if it exsists
-        buffers_t::iterator found = buffers_.find(topic);
-        // If topic not found, error and exit
-        if (found == buffers_.end())
-        { 
-            res.message = "Topic not subscribed: " + topic;
-            res.success = true;
-            return true;
-        }
-        MessageQueue& message_queue = *(*found).second;
-
-        // Acquire lock for this queue
-        boost::mutex::scoped_lock l(message_queue.lock);
-
-        // Open bag if this the first valid topic and there is data
-        if (not valid and not message_queue.queue_.empty())
-        {
-            valid = true;
-            try { 
-                bag.open(req.filename, bagmode::Write);
-            } catch (rosbag::BagException const& err) {
-                res.success = false;
-                res.message = string("Failed to open bag: ") + err.what();
+            // Resolve and clean topic
+            try
+            {
+                topic = ros::names::resolve(nh_.getNamespace(), topic);
+            }
+            catch (ros::InvalidNameException const& err)
+            {
+                // TODO: just skip this topic instead of stopping whole write
+                res.message = string("Invalid name ") + err.what();
                 return true;
-            }       
-        }
+            }
 
-        // Write queue
-        ROS_INFO("DOING TOPIC %s", topic.c_str());
-        while(not message_queue.queue_.empty())
-        {
-            SnapshotMessage msg = message_queue._pop();
-            bag.write(topic, msg.time, *msg.msg, msg.connection_header);
+            // Find the message queue for this topic if it exsists
+            buffers_t::iterator found = buffers_.find(topic);
+            // If topic not found, error and exit
+            if (found == buffers_.end())
+            { 
+                res.message = "Topic not subscribed: " + topic;
+                res.success = true;
+                return true;
+            }
+            MessageQueue& message_queue = *(*found).second;
+
+            // Acquire lock for this queue
+            boost::mutex::scoped_lock l(message_queue.lock);
+
+            // Open bag if this the first valid topic and there is data
+            if (not valid and not message_queue.queue_.empty())
+            {
+                valid = true;
+                try { 
+                    bag.open(req.filename, bagmode::Write);
+                } catch (rosbag::BagException const& err) {
+                    res.success = false;
+                    res.message = string("Failed to open bag: ") + err.what();
+                    return true;
+                }       
+                ROS_INFO("Writing snapshot to %s", req.filename.c_str());
+            }
+
+            // Write queue
+            //TODO REMOVE dead ROS_INFO("DOING TOPIC %s", topic.c_str());
+            while(not message_queue.queue_.empty())
+            {
+                SnapshotMessage msg = message_queue._pop();
+                bag.write(topic, msg.time, *msg.msg, msg.connection_header);
+            }
+            
         }
-        
+    } 
+    // If topic list empty, record all buffered topics
+    else 
+    {
+        BOOST_FOREACH(buffers_t::value_type& pair, buffers_)
+        {
+            MessageQueue& message_queue = *(pair.second);
+
+            // Acquire lock for this queue
+            boost::mutex::scoped_lock l(message_queue.lock);
+
+            // Open bag if this the first valid topic and there is data
+            if (not valid and not message_queue.queue_.empty())
+            {
+                valid = true;
+                try { 
+                    bag.open(req.filename, bagmode::Write);
+                } catch (rosbag::BagException const& err) {
+                    res.success = false;
+                    res.message = string("Failed to open bag: ") + err.what();
+                    return true;
+                }       
+                ROS_INFO("Writing snapshot to %s", req.filename.c_str());
+            }
+
+            // Write queue
+            //TODO REMOVE dead ROS_INFO("DOING TOPIC %s", topic.c_str());
+            while(not message_queue.queue_.empty())
+            {
+                SnapshotMessage msg = message_queue._pop();
+                bag.write(pair.first, msg.time, *msg.msg, msg.connection_header);
+            }
+            
+        }
     }
 
     // If no topics were subscribed/valid/contained data, this is considered a non-success
     if (not valid)
     {
         res.success = false;
-        res.message = "no data on selected topics";
+        res.message = res.NO_DATA;
         return true;
     }
 
     res.success = true;
     return true;
+}
+
+void Snapshoter::clear()
+{
+    BOOST_FOREACH(buffers_t::value_type& pair, buffers_)
+    {
+        pair.second->clear();
+    }
 }
 
 bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res)
@@ -345,9 +402,20 @@ bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Re
         res.message = "cannot enable recording while writing.";
         return true;
     }
-    boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
-    //TODO: clear buffers if going from disabled to enabled? (this would create a gap in time in the buffer)
-    recording_ = req.data;
+    // clear buffers if going from paused to recording as messages may have been dropped
+    if (req.data and not recording_)
+    {
+        boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
+        clear();
+        ROS_INFO("Buffering resumed");
+        recording_ = true;
+    }
+    if (not req.data and recording_)
+    {
+        boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
+        ROS_INFO("Buffering paused.");
+        recording_ = false;
+    }
     res.success = true;
     return true;
 }
@@ -358,7 +426,7 @@ int Snapshoter::run() {
     //ROS_INFO("DEFAULT_BUFFER_LIMIT=%d, DEFAULT_DURATION_LIMIT=%f", options_.default_memory_limit_, options_.default_duration_limit_.toSec());
 
     // Create the queue for each topic and set up the subscriber to add to it on new messages
-    BOOST_FOREACH(SnapshoterOptions::topics_t::value_type pair, options_.topics_)
+    BOOST_FOREACH(SnapshoterOptions::topics_t::value_type& pair, options_.topics_)
     {
         string topic = ros::names::resolve(nh_.getNamespace(), pair.first);
         fixTopicOptions(pair.second);
@@ -368,6 +436,10 @@ int Snapshoter::run() {
         ROS_ASSERT_MSG(res.second, "failed to add %s to topics. Perhaps it is a duplicate?", topic.c_str());
         subscribe(topic, queue);
     }
+
+    // Now that subscriptions are setup, setup service servers for writing and pausing
+    trigger_snapshot_server_ = nh_.advertiseService("trigger_snapshot", &Snapshoter::triggerSnapshotCb, this);
+    enable_server_ = nh_.advertiseService("record", &Snapshoter::recordCb, this);
 
     // Use multiple callback threads
     ros::MultiThreadedSpinner spinner(4); // Use 4 threads

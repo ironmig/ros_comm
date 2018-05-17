@@ -5,7 +5,7 @@ if(NOT WIN32)
   set_directory_properties(PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra")
 endif()
 
-find_package(catkin REQUIRED COMPONENTS rosbag_storage rosconsole roscpp std_srvs topic_tools xmlrpcpp message_generation)
+find_package(catkin REQUIRED COMPONENTS rosbag_storage rosconsole roscpp std_srvs topic_tools xmlrpcpp message_generation rosgraph_msgs)
 find_package(Boost REQUIRED COMPONENTS date_time regex program_options filesystem)
 find_package(BZip2 REQUIRED)
 
@@ -18,8 +18,9 @@ include_directories(include ${catkin_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS}
   ${BZIP2_INCLUDE_DIR}
 )
 
+add_message_files(FILES SnapshotStatus.msg)
 add_service_files(FILES TriggerSnapshot.srv)
-generate_messages()
+generate_messages(DEPENDENCIES rosgraph_msgs)
 
 catkin_package(
   LIBRARIES rosbag

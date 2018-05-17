@@ -30,8 +30,6 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-#
-# test_bag.py
 
 import hashlib
 import heapq
@@ -62,19 +60,20 @@ class TestRosbagSnapshot(unittest.TestCase):
     def test_1_service_connects(self):
         self.trigger.wait_for_service(timeout=1.0)
 
-    def test_invalid_topic_fails(self):
+    def test_2_invalid_topic_fails(self):
         filename = '/tmp/should_not_exist.bag'
         res = self.trigger(filename=filename, topics=['>43?'])
         self.assertFalse(res.success)
         self.assertFalse(os.path.isfile(filename))
 
-    def test_2_write_success(self):
+    def test_3_write_success(self):
+        rospy.sleep(0.5) # Give some time to get data
         filename = '/tmp/test.bag'
-        req = TriggerSnapshotRequest(filename='/tmp/test_snapshot.bag')
+        req = TriggerSnapshotRequest(filename=filename)
         req.topics.append('/test')
         req.topics.append('/test2')
         res = self.trigger(req)
-        self.assertTrue(res.success)
+        self.assertTrue(res.success, msg="Snapshot should have succeeded. Message: {}".format(res.message))
         self.assertTrue(res.message == "")
         self.assertTrue(os.path.isfile(filename))
 

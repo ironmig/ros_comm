@@ -151,7 +151,7 @@ def snapshot_cmd(argv):
     (options, args) = parser.parse_args(argv)
 
     exepath = roslib.packages.find_node('rosbag', 'snapshot')
-    if not recordpath:
+    if not exepath:
         parser.error("Cannot find rosbag/snapshot executable")
     cmd = [exepath[0]]
 
