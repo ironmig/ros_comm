@@ -45,14 +45,83 @@ using rosbag::SnapshoterTopicOptions;
 
 //! Parse the command-line arguments for recorder options
 SnapshoterOptions parseOptions(int argc, char** argv) {
-    SnapshoterOptions opts(SnapshoterTopicOptions::NO_DURATION_LIMIT, 100);
-    opts.addTopic("/test");
-    opts.addTopic("/test2", ros::Duration(-1), 100000000);
+    /// TODO: program options for stuff
+    SnapshoterOptions opts(ros::Duration(10.0), SnapshoterTopicOptions::NO_MEMORY_LIMIT);
     return opts;
 }
 
+/* Read configured topics from by reading ~topics ROS param.
+ * TODO: use exceptions instead of asserts to follow style conventions
+ * This param should be set in the following (YAML represented) structure
+ *   <rosparam>
+ *       topics:                   # List of topics
+ *           - /topic1             # Topic which will adopt default memory and duration limits
+ *           - topic2:             # Topic with overriden memory and duration limit
+ *               memory: 5000      # 5000 Byte limit on buffered data from this topic
+ *               duration: 30      # 30 second duration limit between newest and oldest message from this topic
+ *   </rosparam>
+ */
+void appendParamOptions(SnapshoterOptions& opts)
+{
+    using XmlRpc::XmlRpcValue;
+    XmlRpcValue topics;
+    if(!ros::param::get("~topics", topics))
+    {
+        ROS_INFO("NO PARAM TOPICS");
+        return;
+    }
+    ROS_ASSERT_MSG(topics.getType() == XmlRpcValue::TypeArray, "topics param must be an array");
+    // Iterator caused exception, hmmm...
+    size_t size = topics.size();
+    for (size_t i = 0; i < size; ++i)
+    {
+        XmlRpcValue topic_value = topics[i];
+        // If it is just a string, add this topic
+        if (topic_value.getType() == XmlRpcValue::TypeString)
+        {
+            opts.addTopic(topic_value);
+        }
+        else if (topic_value.getType() == XmlRpcValue::TypeStruct)
+        {
+            ROS_ASSERT_MSG(topic_value.size() == 1, "Paramater invalid for topic %lu", i);
+            std::string const& topic = (*topic_value.begin()).first;
+            XmlRpcValue& topic_config = (*topic_value.begin()).second;
+            ROS_ASSERT_MSG(topic_config.getType() == XmlRpcValue::TypeStruct, "Topic limits invalid for: '%s'", topic.c_str());
+
+            ros::Duration dur = SnapshoterTopicOptions::INHERIT_DURATION_LIMIT;
+            int64_t mem = SnapshoterTopicOptions::INHERIT_MEMORY_LIMIT;
+            std::string duration = "duration";
+            std::string memory = "memory";
+            if (topic_config.hasMember(duration))
+            {
+                XmlRpcValue& dur_limit = topic_config[duration];
+                if (dur_limit.getType() == XmlRpcValue::TypeDouble)
+                {
+                    double seconds = dur_limit;
+                    dur = ros::Duration(seconds);
+                }
+                else if (dur_limit.getType() == XmlRpcValue::TypeInt)
+                {
+                    int seconds = dur_limit;
+                    dur = ros::Duration(seconds, 0);
+                }
+                else ROS_FATAL("err");
+            }
+            if (topic_config.hasMember("memory"))
+            {
+                XmlRpcValue& mem_limit = topic_config[memory];
+                ROS_ASSERT_MSG(mem_limit.getType() == XmlRpcValue::TypeInt, "Memory limit is not an int for topic '%s'", topic.c_str());
+                int tmp = mem_limit;
+                mem = tmp;
+            }
+            opts.addTopic(topic, dur, mem);
+        }
+        else ROS_ASSERT_MSG(false, "Parameter invalid for topic %lu", i);
+    }
+}
+
 int main(int argc, char** argv) {
-    ros::init(argc, argv, "snapshot", ros::init_options::AnonymousName);
+    ros::init(argc, argv, "snapshot");//, ros::init_options::AnonymousName);  
 
     // Parse the command-line options
     SnapshoterOptions opts;
@@ -62,7 +131,11 @@ int main(int argc, char** argv) {
     catch (ros::Exception const& ex) {
         ROS_ERROR("Error reading options: %s", ex.what());
         return 1;
+ 
     }
+
+    // Get additional topic configurations if they're in ROS params
+    appendParamOptions(opts);
 
     // Run the snapshoter
     rosbag::Snapshoter snapshoter(opts);
