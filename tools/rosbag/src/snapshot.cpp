@@ -47,7 +47,7 @@ using rosbag::SnapshoterTopicOptions;
 SnapshoterOptions parseOptions(int argc, char** argv) {
     SnapshoterOptions opts(SnapshoterTopicOptions::NO_DURATION_LIMIT, 100);
     opts.addTopic("/test");
-    opts.addTopic("/test2", ros::Duration(20.0), -1);
+    opts.addTopic("/test2", ros::Duration(-1), 100000000);
     return opts;
 }
 

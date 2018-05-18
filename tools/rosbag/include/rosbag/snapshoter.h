@@ -44,6 +44,8 @@
 #include <rosbag/TriggerSnapshot.h>
 #include <std_srvs/SetBool.h>
 #include <topic_tools/shape_shifter.h>
+#include <rosgraph_msgs/TopicStatistics.h>
+#include <rosbag/SnapshotStatus.h>
 #include "rosbag/bag.h"
 #include "rosbag/macros.h"
 
@@ -84,12 +86,15 @@ struct ROSBAG_DECL SnapshoterOptions
     ros::Duration   default_duration_limit_;
     // Memory limit to use for a topic's buffer if one is not specified
     int32_t        default_memory_limit_;
-
+    // Period between publishing topic status messages. If <= ros::Duration(0), don't publish status
+    ros::Duration status_period_;
     typedef std::map<std::string, SnapshoterTopicOptions> topics_t;
     // Provides list of topics to snapshot and their limit configurations
     topics_t topics_;
 
-    SnapshoterOptions(ros::Duration default_duration_limit = ros::Duration(), int32_t default_memory_limit=0);
+
+    SnapshoterOptions(ros::Duration default_duration_limit = ros::Duration(), int32_t default_memory_limit=0,
+                      ros::Duration status_period = ros::Duration(1));
 
     // Add a new topic to the configuration
     void addTopic(std::string const& topic,
@@ -133,6 +138,8 @@ public:
     void write(Bag& bag);
     // Store the subscriber for this topic's queue internaly so it is not deleted
     void setSubscriber(boost::shared_ptr<ros::Subscriber> sub);
+    // 
+    void fillStatus(rosgraph_msgs::TopicStatistics &status);
 private:
     boost::mutex lock;
     SnapshoterTopicOptions options_;
@@ -178,6 +185,7 @@ private:
     ros::ServiceServer trigger_snapshot_server_;
     ros::ServiceServer enable_server_;
     ros::Publisher status_pub_;
+    ros::Timer status_timer_;
 
     // Replace individual topic limits with node defaults if they are flagged for it (see SnapshoterTopicOptions)
     void fixTopicOptions(SnapshoterTopicOptions &options);
@@ -195,6 +203,8 @@ private:
     bool triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag::TriggerSnapshot::Response& res);
     // Service callback, enable or disable recording (storing new messages into queue). Used to pause before writing
     bool recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
+    // Publish status containing statistics of currently buffered topics and other state
+    void publishStatus(ros::TimerEvent const& e);
 };
 
 } // namespace rosbag

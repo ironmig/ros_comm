@@ -60,8 +60,8 @@ SnapshoterTopicOptions::SnapshoterTopicOptions(ros::Duration duration_limit, int
 {
 }
 
-SnapshoterOptions::SnapshoterOptions(ros::Duration default_duration_limit, int32_t default_memory_limit): 
-    default_duration_limit_(default_duration_limit), default_memory_limit_(default_memory_limit), topics_() 
+SnapshoterOptions::SnapshoterOptions(ros::Duration default_duration_limit, int32_t default_memory_limit, ros::Duration status_period): 
+    default_duration_limit_(default_duration_limit), default_memory_limit_(default_memory_limit), status_period_(status_period), topics_() 
 {
 }
 
@@ -85,6 +85,16 @@ MessageQueue::MessageQueue(SnapshoterTopicOptions const& options) : options_(opt
 void MessageQueue::setSubscriber(shared_ptr<ros::Subscriber> sub)
 {
     sub_ = sub;
+}
+
+void MessageQueue::fillStatus(rosgraph_msgs::TopicStatistics &status)
+{
+    boost::mutex::scoped_lock l(lock);
+    if (!queue_.size()) return;
+    status.traffic = size_;
+    status.delivered_msgs = queue_.size();
+    status.window_start = queue_.front().time;
+    status.window_stop = queue_.back().time;
 }
 
 void MessageQueue::clear()
@@ -265,7 +275,8 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
     }
 
     // Ensure that state is updated when function exits, regardlesss of branch path / exception events
-    BOOST_SCOPE_EXIT(&state_lock_, &writing_, &recording_, recording_prior, this_) {
+    BOOST_SCOPE_EXIT(&state_lock_, &writing_, &recording_, recording_prior, this_)
+    {
         // Clear buffers beacuase time gaps (skipped messages) may have occured while paused
         this_->clear();
         boost::unique_lock<boost::upgrade_mutex> write_lock(state_lock_);
@@ -420,6 +431,30 @@ bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Re
     return true;
 }
 
+void Snapshoter::publishStatus(ros::TimerEvent const& e)
+{
+    (void)e; // Void your unused variable compiler warnings away!
+    if (!status_pub_.getNumSubscribers()) return;
+
+    // TODO: consider options to make this faster (caching and updating last status, having queues track their own status)
+    SnapshotStatus msg;
+    {
+        boost::shared_lock<boost::upgrade_mutex> lock(state_lock_);
+        msg.buffering = recording_; // TODO: name consistency. Is it buffering or recording?
+    }
+    BOOST_FOREACH(buffers_t::value_type& pair, buffers_)
+    {
+        rosgraph_msgs::TopicStatistics status;
+        status.topic = pair.first;
+        pair.second->fillStatus(status);
+        msg.topics.push_back(status);
+    }
+   
+
+    // TODO: actually fill message with topic statuses
+    status_pub_.publish(msg);
+} 
+
 int Snapshoter::run() {
     if (!nh_.ok())
         return 0;
@@ -440,6 +475,10 @@ int Snapshoter::run() {
     // Now that subscriptions are setup, setup service servers for writing and pausing
     trigger_snapshot_server_ = nh_.advertiseService("trigger_snapshot", &Snapshoter::triggerSnapshotCb, this);
     enable_server_ = nh_.advertiseService("record", &Snapshoter::recordCb, this);
+    
+    // Start timer to publish status regularly
+    if (options_.status_period_ > ros::Duration(0))
+        status_timer_ = nh_.createTimer(options_.status_period_, &Snapshoter::publishStatus, this);
 
     // Use multiple callback threads
     ros::MultiThreadedSpinner spinner(4); // Use 4 threads
