@@ -145,10 +145,16 @@ def record_cmd(argv):
     process.wait()
 
 def snapshot_cmd(argv):
-    parser = optparse.OptionParser(usage="rosbag snapshot TODO",
-                                   description="TODO",
+    parser = optparse.OptionParser(usage="%prog snapshot [options] topic1 topic2 ...",
+                                   description="Maintains a buffer of recent messages in memory until triggered to write to a bag",
                                    formatter=optparse.IndentedHelpFormatter())
+    parser.add_option('-t', '--trigger-write', dest="trigger",  default=False, action="store_true", help="Trigger a write of listed topics. If no topics, write all")
+    parser.add_option('-p', '--pause',         dest="pause",    default=False, action="store_true", help="Pause buffering of new data.")
+    parser.add_option('-r', '--resume',        dest="resume",   default=False, action="store_true", help="Resume buffering of new data")
+    parser.add_option('-O', '--out-file',      dest='out',      default="",                         help="When -t is also used, set the name of the written bag file")
+ 
     (options, args) = parser.parse_args(argv)
+    print(args)
 
     exepath = roslib.packages.find_node('rosbag', 'snapshot')
     if not exepath:

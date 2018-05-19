@@ -207,6 +207,20 @@ private:
     void publishStatus(ros::TimerEvent const& e);
 };
 
+// TODO document, implement
+class ROSBAG_DECL SnapshoterClient
+{
+public:
+    SnapshoterClient();
+    void connect();
+    bool pause();
+    bool resume(); 
+private:
+    ros::NodeHandle nh_;
+    ros::ServiceClient record_client_;
+    ros::ServiceClient trigger_client_;
+};
+
 } // namespace rosbag
 
 #endif

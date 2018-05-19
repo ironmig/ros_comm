@@ -421,7 +421,7 @@ bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Re
         ROS_INFO("Buffering resumed");
         recording_ = true;
     }
-    if (not req.data and recording_)
+    else if (not req.data and recording_)
     {
         boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
         ROS_INFO("Buffering paused.");
@@ -433,7 +433,7 @@ bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Re
 
 void Snapshoter::publishStatus(ros::TimerEvent const& e)
 {
-    (void)e; // Void your unused variable compiler warnings away!
+    (void)e; // Make your "unused variable" warnings a thing of the past with CastToVoid (TM)
     if (!status_pub_.getNumSubscribers()) return;
 
     // TODO: consider options to make this faster (caching and updating last status, having queues track their own status)
@@ -450,8 +450,6 @@ void Snapshoter::publishStatus(ros::TimerEvent const& e)
         msg.topics.push_back(status);
     }
    
-
-    // TODO: actually fill message with topic statuses
     status_pub_.publish(msg);
 } 
 
