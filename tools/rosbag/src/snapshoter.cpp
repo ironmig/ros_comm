@@ -180,6 +180,23 @@ SnapshotMessage MessageQueue::_pop()
     return tmp;
 }
 
+MessageQueue::range_t MessageQueue::rangeFromTimes(Time const&start, Time const&stop)
+{
+    range_t::first_type begin = queue_.begin();
+    range_t::second_type end = queue_.end();
+
+    // Increment / Decrement iterators until time contraints are met
+    if (not start.isZero())
+    {
+        while(begin != end and (*begin).time < start) ++begin;
+    }
+    if (not stop.isZero())
+    {
+        while(end != begin and (* (end - 1)).time > stop) --end;
+    }
+    return range_t(begin, end);
+}
+
 
 const int Snapshoter::QUEUE_SIZE = 10;
 
@@ -256,6 +273,35 @@ void Snapshoter::subscribe(string const& topic, boost::shared_ptr<MessageQueue> 
     queue->setSubscriber(sub);
 }
 
+void Snapshoter::writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, string const& topic, rosbag::TriggerSnapshot::Request& req)
+{
+    // acquire lock for this queue
+    boost::mutex::scoped_lock l(message_queue.lock);
+
+    MessageQueue::range_t range = message_queue.rangeFromTimes(req.start_time, req.stop_time);
+
+    // open bag if this the first valid topic and there is data
+    if (not bag.isOpen() and range.second > range.first)
+    {
+        try { 
+            bag.open(req.filename, bagmode::Write);
+        } catch (rosbag::BagException const& err) {
+            // TODO: figure out how to return this!
+            //res.success = false;
+            //res.message = string("failed to open bag: ") + err.what();
+            return;
+        }
+        ROS_INFO("writing snapshot to %s", req.filename.c_str());
+    }
+
+    // write queue
+    for (MessageQueue::range_t::first_type msg_it = range.first; msg_it != range.second; ++msg_it)
+    {
+        SnapshotMessage const& msg = *msg_it;
+        bag.write(topic, msg.time, *msg.msg, msg.connection_header);
+    }
+}
+
 bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag::TriggerSnapshot::Response& res)
 {
     if (not postfixFilename(req.filename))
@@ -296,10 +342,6 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
     Bag bag;
 
     // Write each selected topic's queue to bag file
-    // TODO: implement specific times to save
-    // TODO: write to bag in time order, not by topic (if this matters for playback correctness / speed)
-    bool valid = false;
-    // If specific topics specified, write only those
     if (req.topics.size())
     {
         BOOST_FOREACH(std::string& topic, req.topics)
@@ -307,13 +349,12 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
             // Resolve and clean topic
             try
             {
+                // TODO: WARN / return in service that this topic was skipped
                 topic = ros::names::resolve(nh_.getNamespace(), topic);
             }
             catch (ros::InvalidNameException const& err)
             {
-                // TODO: just skip this topic instead of stopping whole write
-                res.message = string("Invalid name ") + err.what();
-                return true;
+                continue;
             }
 
             // Find the message queue for this topic if it exsists
@@ -321,37 +362,11 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
             // If topic not found, error and exit
             if (found == buffers_.end())
             { 
-                res.message = "Topic not subscribed: " + topic;
-                res.success = true;
-                return true;
+                // TODO: WARN / return in service that this topic was skipped
+                continue;
             }
             MessageQueue& message_queue = *(*found).second;
-
-            // Acquire lock for this queue
-            boost::mutex::scoped_lock l(message_queue.lock);
-
-            // Open bag if this the first valid topic and there is data
-            if (not valid and not message_queue.queue_.empty())
-            {
-                valid = true;
-                try { 
-                    bag.open(req.filename, bagmode::Write);
-                } catch (rosbag::BagException const& err) {
-                    res.success = false;
-                    res.message = string("Failed to open bag: ") + err.what();
-                    return true;
-                }       
-                ROS_INFO("Writing snapshot to %s", req.filename.c_str());
-            }
-
-            // Write queue
-            //TODO REMOVE dead ROS_INFO("DOING TOPIC %s", topic.c_str());
-            while(not message_queue.queue_.empty())
-            {
-                SnapshotMessage msg = message_queue._pop();
-                bag.write(topic, msg.time, *msg.msg, msg.connection_header);
-            }
-            
+            writeTopic(bag, message_queue, topic, req);
         }
     } 
     // If topic list empty, record all buffered topics
@@ -360,37 +375,13 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
         BOOST_FOREACH(buffers_t::value_type& pair, buffers_)
         {
             MessageQueue& message_queue = *(pair.second);
-
-            // Acquire lock for this queue
-            boost::mutex::scoped_lock l(message_queue.lock);
-
-            // Open bag if this the first valid topic and there is data
-            if (not valid and not message_queue.queue_.empty())
-            {
-                valid = true;
-                try { 
-                    bag.open(req.filename, bagmode::Write);
-                } catch (rosbag::BagException const& err) {
-                    res.success = false;
-                    res.message = string("Failed to open bag: ") + err.what();
-                    return true;
-                }       
-                ROS_INFO("Writing snapshot to %s", req.filename.c_str());
-            }
-
-            // Write queue
-            //TODO REMOVE dead ROS_INFO("DOING TOPIC %s", topic.c_str());
-            while(not message_queue.queue_.empty())
-            {
-                SnapshotMessage msg = message_queue._pop();
-                bag.write(pair.first, msg.time, *msg.msg, msg.connection_header);
-            }
-            
+            std::string const& topic = pair.first;
+            writeTopic(bag, message_queue, topic, req);
         }
     }
 
     // If no topics were subscribed/valid/contained data, this is considered a non-success
-    if (not valid)
+    if (not bag.isOpen())
     {
         res.success = false;
         res.message = res.NO_DATA;

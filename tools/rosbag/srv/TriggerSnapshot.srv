@@ -3,6 +3,8 @@ string filename   # Name of bag file to save snapshot to.
                   # otherwise, the current datatime and .bag will be appended to the name
 string[] topics   # List of topics to include in snapshot. 
                   # If empty, all buffered topics will be written
+time start_time   # Earliest timestamp for a message to be included in written bag
+time stop_time    # Latest timestamp for a message to be incldued in written bag
 
 ---
 

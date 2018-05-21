@@ -47,9 +47,19 @@ using rosbag::SnapshoterOptions;
 using rosbag::SnapshoterTopicOptions;
 using rosbag::SnapshoterClientOptions;
 
+const int MB_TO_BYTES = 1E6;
+
 
 bool parseOptions(po::variables_map& vm, int argc, char** argv)
 {
+    // Strip ros arguments and reassemble
+    ros::V_string cleaned_args;
+    ros::removeROSArgs(argc, argv, cleaned_args);
+    int cleaned_argc = cleaned_args.size();
+    char const* cleaned_argv[cleaned_argc];
+    for (int i = 0; i < cleaned_argc; ++i)
+        cleaned_argv[i] = cleaned_args[i].c_str();
+
     po::options_description desc("Options");
     desc.add_options()
         ("help,h", "produce help message")
@@ -65,7 +75,7 @@ bool parseOptions(po::variables_map& vm, int argc, char** argv)
 
     try
     {
-        po::store(po::command_line_parser(argc, argv).options(desc).positional(p).run(), vm);
+        po::store(po::command_line_parser(cleaned_argc, cleaned_argv).options(desc).positional(p).run(), vm);
         po::notify(vm); 
     } catch (boost::program_options::error const& e)
     {
@@ -91,7 +101,7 @@ bool parseVariablesMap(SnapshoterOptions& opts, po::variables_map const& vm)
         BOOST_FOREACH(std::string& str, topics)
             opts.addTopic(str);
     }
-    opts.default_memory_limit_ = int(1E6 * vm["size"].as<double>());
+    opts.default_memory_limit_ = int(MB_TO_BYTES * vm["size"].as<double>());
     opts.default_duration_limit_ = ros::Duration(vm["duration"].as<double>());
     return true;
 }
@@ -122,11 +132,19 @@ bool parseVariablesMapClient(SnapshoterClientOptions& opts, po::variables_map co
  *               duration: 30      # 30 second duration limit between newest and oldest message from this topic
  *   </rosparam>
  */
-void appendParamOptions(SnapshoterOptions& opts)
+void appendParamOptions(ros::NodeHandle& nh, SnapshoterOptions& opts)
 {
     using XmlRpc::XmlRpcValue;
     XmlRpcValue topics;
-    if(!ros::param::get("~topics", topics))
+
+    // Override program options for default limits if the parameters are set.
+    double tmp;
+    if (nh.getParam("default_memory_limit", tmp))
+        opts.default_memory_limit_ = int(MB_TO_BYTES * tmp);
+    if (nh.getParam("default_duration_limit", tmp))
+        opts.default_duration_limit_ = ros::Duration(tmp);
+
+    if(!nh.getParam("topics", topics))
     {
         return;
     }
@@ -169,10 +187,19 @@ void appendParamOptions(SnapshoterOptions& opts)
             }
             if (topic_config.hasMember("memory"))
             {
-                XmlRpcValue& mem_limit = topic_config[memory];
-                ROS_ASSERT_MSG(mem_limit.getType() == XmlRpcValue::TypeInt, "Memory limit is not an int for topic '%s'", topic.c_str());
-                int tmp = mem_limit;
-                mem = tmp;
+                XmlRpcValue& mem_limit = topic_config[duration];
+                if (mem_limit.getType() == XmlRpcValue::TypeDouble)
+                {
+                    double mb = mem_limit;
+                    mem = mb;
+                }
+                else if (mem_limit.getType() == XmlRpcValue::TypeInt)
+                {
+                    int mb = mem_limit;
+                    mem = mb;
+                }
+                else ROS_FATAL("err");
+                mem *= MB_TO_BYTES; // Convert MB to bytes
             }
             opts.addTopic(topic, dur, mem);
         }
@@ -203,7 +230,8 @@ int main(int argc, char** argv) {
 
     ros::init(argc, argv, "snapshot", ros::init_options::AnonymousName);
     // Get additional topic configurations if they're in ROS params
-    appendParamOptions(opts);
+    ros::NodeHandle private_nh("~");
+    appendParamOptions(private_nh, opts);
 
     // Exit if not topics selected
     if (!opts.topics_.size()) 

@@ -126,6 +126,15 @@ struct ROSBAG_DECL SnapshotMessage
 class ROSBAG_DECL MessageQueue
 {
 friend Snapshoter;
+private:
+    boost::mutex lock;
+    SnapshoterTopicOptions options_;
+    // Current total size of the queue
+    int64_t size_;
+    typedef std::deque<SnapshotMessage> queue_t;
+    queue_t queue_;
+    // Subscriber to the callback which uses this queue
+    boost::shared_ptr<ros::Subscriber> sub_;
 public:
     MessageQueue(SnapshoterTopicOptions const& options);
     // Add a new message to the internal queue if possible, truncating the front of the queue as needed to enforce limits
@@ -142,15 +151,10 @@ public:
     void setSubscriber(boost::shared_ptr<ros::Subscriber> sub);
     // 
     void fillStatus(rosgraph_msgs::TopicStatistics &status);
-private:
-    boost::mutex lock;
-    SnapshoterTopicOptions options_;
-    // Current total size of the queue
-    int64_t size_;
-    std::deque<SnapshotMessage> queue_;
-    // Subscriber to the callback which uses this queue
-    boost::shared_ptr<ros::Subscriber> sub_;
 
+    typedef std::pair<queue_t::const_iterator, queue_t::const_iterator> range_t;
+    range_t rangeFromTimes(ros::Time const&start, ros::Time const& end);
+private:
     // Internal push whitch does not obtain lock
     void _push(SnapshotMessage const& msg);
     // Internal pop whitch does not obtain lock
@@ -193,7 +197,7 @@ private:
     void fixTopicOptions(SnapshoterTopicOptions &options);
     // Clean a requested filename, ensuring .bag is at the end and appending the date TODO make clearer, mention return bool
     bool postfixFilename(std::string& file);
-    // TODO 
+    // TODO document, implement
     std::string timeAsStr();
     // Clear the internal buffers of all topics. Used when resuming after a pause to avoid time gaps
     void clear();
@@ -207,6 +211,7 @@ private:
     bool recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
     // Publish status containing statistics of currently buffered topics and other state
     void publishStatus(ros::TimerEvent const& e);
+    void writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, std::string const& topic, rosbag::TriggerSnapshot::Request& req);
 };
 
 struct ROSBAG_DECL SnapshoterClientOptions
@@ -222,7 +227,7 @@ struct ROSBAG_DECL SnapshoterClientOptions
     std::string filename_;
 };
 
-// TODO document, implement
+// TODO document
 class ROSBAG_DECL SnapshoterClient
 {
 public:

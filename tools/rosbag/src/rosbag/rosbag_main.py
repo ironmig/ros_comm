@@ -998,7 +998,7 @@ class ProgressMeter(object):
 def rosbagmain(argv=None):
     cmds = RosbagCmds()
     cmds.add_cmd('record', record_cmd, "Record a bag file with the contents of specified topics.")
-    cmds.add_cmd('snapshot', snapshot_cmd, "TODO")
+    cmds.add_cmd('snapshot', snapshot_cmd, "Keep a buffer of recent message then write to bag file when externally triggered.")
     cmds.add_cmd('info', info_cmd, 'Summarize the contents of one or more bag files.')
     cmds.add_cmd('play', play_cmd, "Play back the contents of one or more bag files in a time-synchronized fashion.")
     cmds.add_cmd('check', check_cmd, 'Determine whether a bag is playable in the current system, or if it can be migrated.')
