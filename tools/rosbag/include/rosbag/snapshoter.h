@@ -77,6 +77,7 @@ struct ROSBAG_DECL SnapshoterTopicOptions
 };
 
 
+
 /* Configuration for the Snapshoter node. Contains default limits for memory and duration
  * and a map of topics to their limits which may override the defaults.
  */
@@ -93,7 +94,7 @@ struct ROSBAG_DECL SnapshoterOptions
     topics_t topics_;
 
 
-    SnapshoterOptions(ros::Duration default_duration_limit = ros::Duration(), int32_t default_memory_limit=0,
+    SnapshoterOptions(ros::Duration default_duration_limit = ros::Duration(30), int32_t default_memory_limit=-1,
                       ros::Duration status_period = ros::Duration(1));
 
     // Add a new topic to the configuration
@@ -101,6 +102,7 @@ struct ROSBAG_DECL SnapshoterOptions
                   ros::Duration duration_limit=SnapshoterTopicOptions::INHERIT_DURATION_LIMIT,
                   int32_t memory_limit=SnapshoterTopicOptions::INHERIT_MEMORY_LIMIT);
 };
+
 
 
 /* Stores a buffered message of an ambiguous type and it's associated metadata (time of arrival, connection data),
@@ -207,19 +209,32 @@ private:
     void publishStatus(ros::TimerEvent const& e);
 };
 
+struct ROSBAG_DECL SnapshoterClientOptions
+{
+    SnapshoterClientOptions();
+    enum Action {
+        TRIGGER_WRITE,
+        PAUSE,
+        RESUME
+    };
+    Action action_;
+    std::vector<std::string> topics_;
+    std::string filename_;
+};
+
 // TODO document, implement
 class ROSBAG_DECL SnapshoterClient
 {
 public:
     SnapshoterClient();
-    void connect();
-    bool pause();
-    bool resume(); 
+    int run(SnapshoterClientOptions const& opts);
 private:
     ros::NodeHandle nh_;
     ros::ServiceClient record_client_;
     ros::ServiceClient trigger_client_;
 };
+
+
 
 } // namespace rosbag
 

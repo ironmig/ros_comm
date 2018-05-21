@@ -36,18 +36,79 @@
 #include "rosbag/exceptions.h"
 
 #include "boost/program_options.hpp"
+#include <string>
+#include <sstream>
 
 namespace po = boost::program_options;
 
 using rosbag::Snapshoter;
+using rosbag::SnapshoterClient;
 using rosbag::SnapshoterOptions;
 using rosbag::SnapshoterTopicOptions;
+using rosbag::SnapshoterClientOptions;
 
-//! Parse the command-line arguments for recorder options
-SnapshoterOptions parseOptions(int argc, char** argv) {
-    /// TODO: program options for stuff
-    SnapshoterOptions opts(ros::Duration(10.0), SnapshoterTopicOptions::NO_MEMORY_LIMIT);
-    return opts;
+
+bool parseOptions(po::variables_map& vm, int argc, char** argv)
+{
+    po::options_description desc("Options");
+    desc.add_options()
+        ("help,h", "produce help message")
+        ("trigger-write,t", "Write buffer of selected topcis to a bag file")
+        ("pause,p", "Stop buffering new messages until resumed of write is triggered")
+        ("resume,r", "Resume buffering new messages, writing over older messages as needed")
+        ("size,s", po::value<double>()->default_value(-1), "Maximum memory per topic to use in buffering in MB. Default: no limit")
+        ("duration,d", po::value<double>()->default_value(30.0), "Maximum difference between newest and oldest buffered message per topic in seconds. Default: 30")
+        ("filename,o", po::value<std::string>()->default_value(""), "Name of output file when triggering a write. If it does NOT end in .bag, the current date/time and .bag will be appended.")
+        ("topic", po::value<std::vector<std::string> >(), "Topic to buffer. If triggering write, write only these topics instead of all buffered topics.");
+    po::positional_options_description p;
+    p.add("topic", -1);
+
+    try
+    {
+        po::store(po::command_line_parser(argc, argv).options(desc).positional(p).run(), vm);
+        po::notify(vm); 
+    } catch (boost::program_options::error const& e)
+    {
+        std::cout << "rosbag snapshot: " << e.what() << std::endl;
+        return false;
+    }
+
+    if (vm.count("help"))
+    {
+        std::cout << "Usage: rosbag snapshot [options] [topic1 topic2 ...]" << std::endl << std::endl <<
+                     "Buffer recent messages until triggered to write or trigger an already running instance."  << std::endl << std::endl;
+        std::cout << desc << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool parseVariablesMap(SnapshoterOptions& opts, po::variables_map const& vm)
+{
+    if (vm.count("topic"))
+    {
+        std::vector<std::string> topics = vm["topic"].as<std::vector<std::string> >();
+        BOOST_FOREACH(std::string& str, topics)
+            opts.addTopic(str);
+    }
+    opts.default_memory_limit_ = int(1E6 * vm["size"].as<double>());
+    opts.default_duration_limit_ = ros::Duration(vm["duration"].as<double>());
+    return true;
+}
+
+bool parseVariablesMapClient(SnapshoterClientOptions& opts, po::variables_map const& vm)
+{
+    if(vm.count("pause")) opts.action_ = SnapshoterClientOptions::PAUSE;
+    else if(vm.count("resume")) opts.action_ = SnapshoterClientOptions::RESUME;
+    else if(vm.count("trigger-write")) 
+    {
+        opts.action_ = SnapshoterClientOptions::TRIGGER_WRITE;
+        if (vm.count("topic"))
+            opts.topics_ = vm["topic"].as<std::vector<std::string> >();
+        if (vm.count("filename"))
+            opts.filename_ = vm["filename"].as<std::string>();
+    }
+    return true;
 }
 
 /* Read configured topics from by reading ~topics ROS param.
@@ -67,7 +128,6 @@ void appendParamOptions(SnapshoterOptions& opts)
     XmlRpcValue topics;
     if(!ros::param::get("~topics", topics))
     {
-        ROS_INFO("NO PARAM TOPICS");
         return;
     }
     ROS_ASSERT_MSG(topics.getType() == XmlRpcValue::TypeArray, "topics param must be an array");
@@ -121,21 +181,36 @@ void appendParamOptions(SnapshoterOptions& opts)
 }
 
 int main(int argc, char** argv) {
-    ros::init(argc, argv, "snapshot");//, ros::init_options::AnonymousName);  
+    // TODO: strip ros arguments from argv so remaps can work
+    po::variables_map vm;
+    if (!parseOptions(vm, argc, argv)) return 1;
+
+    // If any of the client flags are on, use the client
+    if (vm.count("trigger-write") || vm.count("pause") || vm.count("resume"))
+    {
+        SnapshoterClientOptions opts;
+        if(!parseVariablesMapClient(opts, vm)) return 1;
+        ros::init(argc, argv, "snapshot_client", ros::init_options::AnonymousName);
+        SnapshoterClient client;
+        return client.run(opts);
+    }
+
 
     // Parse the command-line options
     SnapshoterOptions opts;
-    try {
-        opts = parseOptions(argc, argv);
-    }
-    catch (ros::Exception const& ex) {
-        ROS_ERROR("Error reading options: %s", ex.what());
-        return 1;
- 
-    }
+    if (!parseVariablesMap(opts, vm)) return 1; 
 
+
+    ros::init(argc, argv, "snapshot", ros::init_options::AnonymousName);
     // Get additional topic configurations if they're in ROS params
     appendParamOptions(opts);
+
+    // Exit if not topics selected
+    if (!opts.topics_.size()) 
+    {
+        ROS_FATAL("No topics selected. Exiting.");
+        return 1;
+    }
 
     // Run the snapshoter
     rosbag::Snapshoter snapshoter(opts);

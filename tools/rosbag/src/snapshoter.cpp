@@ -72,6 +72,11 @@ void SnapshoterOptions::addTopic(std::string const& topic, ros::Duration duratio
 }
 
 
+SnapshoterClientOptions::SnapshoterClientOptions() : action_(SnapshoterClientOptions::TRIGGER_WRITE)
+{
+}
+
+
 SnapshotMessage::SnapshotMessage(topic_tools::ShapeShifter::ConstPtr _msg, boost::shared_ptr<ros::M_string> _connection_header, Time _time):
     msg(_msg), connection_header(_connection_header), time(_time)
 {
@@ -114,7 +119,7 @@ ros::Duration MessageQueue::duration() const
 bool MessageQueue::preparePush(int32_t size, ros::Time const& time)
 {
     // The only case where message cannot be addded is if size is greater than limit
-    if (options_.memory_limit_ != SnapshoterTopicOptions::NO_MEMORY_LIMIT && size > options_.memory_limit_)
+    if (options_.memory_limit_ > SnapshoterTopicOptions::NO_MEMORY_LIMIT && size > options_.memory_limit_)
         return false;
 
     // If memory limit is enforced, remove elements from front of queue until limit would be met once message is added
@@ -482,6 +487,67 @@ int Snapshoter::run() {
     ros::MultiThreadedSpinner spinner(4); // Use 4 threads
     spinner.spin(); // spin() will not return until the node has been shutdown
     return 0;
+}
+
+
+SnapshoterClient::SnapshoterClient()
+{
+}
+
+int SnapshoterClient::run(SnapshoterClientOptions const& opts)
+{
+    // TODO: better error messages
+    if (opts.action_ == SnapshoterClientOptions::TRIGGER_WRITE)
+    {
+        ros::ServiceClient client = nh_.serviceClient<rosbag::TriggerSnapshot>("trigger_snapshot");
+        if (not client.waitForExistence(ros::Duration(1.0)))
+        {
+            std::cout << "ERROR: Service does not exsist" << std::endl;
+            return 1;
+        }
+        rosbag::TriggerSnapshotRequest req;
+        req.topics = opts.topics_;
+        req.filename = opts.filename_;
+        rosbag::TriggerSnapshotResponse res;
+        if (not client.call(req, res))
+        {
+            std::cout << "Service call failed" << std::endl;
+            return 1;
+        }
+        if (not res.success)
+        {
+            std::cout << "Snapshot responded with error: " << res.message << std::endl;
+            return 1;
+        }
+        return 0;
+    }
+    else if (opts.action_ == SnapshoterClientOptions::PAUSE || opts.action_ == SnapshoterClientOptions::RESUME)
+    {
+        ros::ServiceClient client = nh_.serviceClient<std_srvs::SetBool>("record");
+        if (not client.waitForExistence(ros::Duration(1.0)))
+        {
+            std::cout << "ERROR: Service does not exsist" << std::endl;
+            return 1;
+        }
+        std_srvs::SetBoolRequest req;
+        req.data = (opts.action_ == SnapshoterClientOptions::RESUME);
+        std_srvs::SetBoolResponse res;
+        if (not client.call(req, res))
+        {
+            std::cout << "Service call failed" << std::endl;
+            return 1;
+        }
+        if (not res.success)
+        {
+            std::cout << "Snapshot responded with error: " << res.message << std::endl;
+            return 1;
+        }
+        return 0;
+    }
+    else {
+        // INVALID  ENUM VALU
+        return 1;
+    }
 }
 
 } // namespace rosbag
