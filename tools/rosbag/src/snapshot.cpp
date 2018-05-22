@@ -187,19 +187,18 @@ void appendParamOptions(ros::NodeHandle& nh, SnapshoterOptions& opts)
             }
             if (topic_config.hasMember("memory"))
             {
-                XmlRpcValue& mem_limit = topic_config[duration];
+                XmlRpcValue& mem_limit = topic_config[memory];
                 if (mem_limit.getType() == XmlRpcValue::TypeDouble)
                 {
                     double mb = mem_limit;
-                    mem = mb;
+                    mem = int(MB_TO_BYTES * mb);
                 }
                 else if (mem_limit.getType() == XmlRpcValue::TypeInt)
                 {
                     int mb = mem_limit;
-                    mem = mb;
+                    mem = MB_TO_BYTES * mb;
                 }
                 else ROS_FATAL("err");
-                mem *= MB_TO_BYTES; // Convert MB to bytes
             }
             opts.addTopic(topic, dur, mem);
         }
@@ -208,7 +207,6 @@ void appendParamOptions(ros::NodeHandle& nh, SnapshoterOptions& opts)
 }
 
 int main(int argc, char** argv) {
-    // TODO: strip ros arguments from argv so remaps can work
     po::variables_map vm;
     if (!parseOptions(vm, argc, argv)) return 1;
 
@@ -242,6 +240,5 @@ int main(int argc, char** argv) {
 
     // Run the snapshoter
     rosbag::Snapshoter snapshoter(opts);
-    int result = snapshoter.run();
-    return result;
+    return snapshoter.run();
 }

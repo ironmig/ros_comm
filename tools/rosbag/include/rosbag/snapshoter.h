@@ -209,6 +209,10 @@ private:
     bool triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag::TriggerSnapshot::Response& res);
     // Service callback, enable or disable recording (storing new messages into queue). Used to pause before writing
     bool recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
+    // Set recording_ to false and do nessesary cleaning, CALLER MUST OBTAIN LOCK
+    void pause();
+    // Set recording_ to true and do nesessary cleaning, CALLER MUST OBTAIN LOCK
+    void resume();
     // Publish status containing statistics of currently buffered topics and other state
     void publishStatus(ros::TimerEvent const& e);
     void writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, std::string const& topic, rosbag::TriggerSnapshot::Request& req);

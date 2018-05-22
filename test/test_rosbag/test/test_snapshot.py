@@ -31,53 +31,211 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import hashlib
-import heapq
 import os
-import shutil
 import sys
 import tempfile
-import time
 import unittest
-
-import genpy
-
-import rosbag
-from rosbag import bag
 import rospy
-from std_msgs.msg import Int32
-from std_msgs.msg import ColorRGBA
+from rosbag import Bag
 from std_msgs.msg import String
-from rosbag.srv import TriggerSnapshot, TriggerSnapshotRequest
+from std_srvs.srv import SetBool
+from rosbag.msg import SnapshotStatus
+from rosbag.srv import TriggerSnapshot, TriggerSnapshotRequest, TriggerSnapshotResponse
+
 
 class TestRosbagSnapshot(unittest.TestCase):
+    '''
+    Tests the "rosbag snapshot" command.
+    Relies on the nodes launched in snapshot.test
+    '''
     def __init__(self, *args):
+        self.params = rospy.get_param('/snapshot/')
+        self._parse_params(self.params)
         #self.pub1 = rospy.Publisher('/test1', Int32, queue_size=10)
         #self.pub2 = rospy.Publisher('/test2', String, queue_size=10)
+        self.last_status = None
+        self.big_pub = rospy.Publisher("/test3", String, queue_size=5)
+        self.status_sub = rospy.Subscriber('/status', SnapshotStatus, self._status_cb, queue_size=5)
         self.trigger = rospy.ServiceProxy("/trigger_snapshot", TriggerSnapshot)
+        self.record = rospy.ServiceProxy("/record", SetBool)
+        
         super(TestRosbagSnapshot, self).__init__(*args)
 
-    def test_1_service_connects(self):
-        self.trigger.wait_for_service(timeout=1.0)
+    def _parse_params(self, params):
+        '''
+        Parse launch parameters of snapshot to cache the topic limits in a map
+        so it is easier to check compliance in later tests.
+        '''
+        self.topic_limits = {}
+        self.default_duration_limit = params['default_duration_limit']
+        self.default_memory_limit = params['default_memory_limit']
+        for topic_obj in self.params['topics']:
+            duration = self.default_duration_limit 
+            memory = self.default_memory_limit
+            if type(topic_obj) == dict:
+                topic = topic_obj.keys()[0]
+                duration = topic_obj[topic].get('duration', duration)
+                memory = topic_obj[topic].get('memory', memory)
+            else:
+                topic = topic_obj
+            topic = rospy.resolve_name(topic)
+            duration = rospy.Duration(duration)
+            memory = 1E6 * memory
+            self.topic_limits[topic] = (duration, memory)
 
-    def test_2_invalid_topic_fails(self):
-        filename = '/tmp/should_not_exist.bag'
-        res = self.trigger(filename=filename, topics=['>43?'])
+    def _status_cb(self, msg):
+        self.last_status = msg
+
+    def _assert_no_data(self, topics=[]):
+        '''
+        Asserts that calling TriggerWrite service with
+        specifed parameters responds non-success and did not create
+        a bag file.
+        '''
+        filename = tempfile.mktemp()
+        res = self.trigger(filename=filename, topics=topics)
         self.assertFalse(res.success)
+        self.assertEqual(res.message, TriggerSnapshotResponse.NO_DATA)
         self.assertFalse(os.path.isfile(filename))
 
-    def test_3_write_success(self):
-        rospy.sleep(0.5) # Give some time to get data
-        filename = '/tmp/test.bag'
-        req = TriggerSnapshotRequest(filename=filename)
-        req.topics.append('/test')
-        req.topics.append('/test2')
+    def _assert_record_success(self, data):
+        '''
+        Assert that the recording SetBool service responds with success
+        '''
+        res = self.record(data)
+        self.assertTrue(res.success)
+        self.assertEqual(res.message, "")
+
+    def _pause(self):
+        self._assert_record_success(False)
+
+    def _resume(self):
+        self._assert_record_success(True)
+
+    def _assert_write_success(self, topics=[], **kwargs):
+        '''
+        Asserts that the TriggerWrite services succeeds for the specified request arguments
+        and that the specified bag file is actually created
+        '''
+        filename = tempfile.mktemp() + '.bag'
+        req = TriggerSnapshotRequest(filename=filename, topics=topics, **kwargs)
         res = self.trigger(req)
-        self.assertTrue(res.success, msg="Snapshot should have succeeded. Message: {}".format(res.message))
+        self.assertTrue(res.success, msg="snapshot should have succeeded. message: {}".format(res.message))
         self.assertTrue(res.message == "")
         self.assertTrue(os.path.isfile(filename))
+        return filename
 
+    def _assert_limits_enforced(self, test_topic, duration, memory):
+        '''
+        Asserts that the measured duration and memory for a topic comply with the launch parameters
+        @param topic: string
+        @param duration: rospy.Duration, age of buffer
+        @param memory: integer, bytes of memory used
+        '''
+        test_topic = rospy.resolve_name(test_topic)
+        self.assertIn(test_topic, self.topic_limits)
+        limits = self.topic_limits[test_topic]
+        if limits[0] > rospy.Duration():
+            self.assertLessEqual(duration, limits[0])
+        if limits[1] > 0:
+            self.assertLessEqual(memory, limits[1])
 
+    def _assert_status_valid(self):
+        '''
+        Check that a status message contains info on all subscribed topics
+        and reports that their buffer complies with the configured limits.
+        '''
+        self.assertIsNotNone(self.last_status)  # A message was recieved
+        topics = [msg.topic for msg in self.last_status.topics]
+        # Oneliners :)
+        status_topics = [rospy.resolve_name(topic.keys()[0] if type(topic) ==dict else topic) for topic in self.params['topics']]
+        self.assertEquals(set(topics), set(status_topics))  # Topics from params are same as topics in status message
+        for topic in self.last_status.topics:
+            duration = topic.window_stop - topic.window_start
+            memory = topic.traffic
+            self._assert_limits_enforced(topic.topic, duration, memory)
+
+    def _assert_bag_valid(self, filename, topics=None, start_time=None, stop_time=None):
+        '''
+        Open the bagfile at the specified filename and read it to ensure topic limits were
+        enforced and the optional topic list and start/stop times are also enforced.
+        '''
+        bag = Bag(filename)
+        topics_dict = bag.get_type_and_topic_info()[1]
+        bag_topics = set(topics_dict.keys())
+        param_topics = set(self.topic_limits.keys())
+        if topics:
+            self.assertEqual(bag_topics, set(topics))
+        self.assertTrue(bag_topics.issubset(param_topics))
+        for topic in topics_dict:
+            size = topics_dict[topic].message_count * 8
+            gen = bag.read_messages(topics=topic)
+            _, _, first_time = gen.next()
+            if start_time:
+                self.assertGreaterEqual(first_time, start_time)
+            for _, _, last_time in gen:  # Read through all messages so last_time is valid
+                pass
+            if stop_time:
+                self.assertLessEqual(last_time, stop_time)
+            duration = last_time - first_time
+            self._assert_limits_enforced(topic, duration, size)
+
+    def test_1_service_connects(self):
+        '''
+        Check that both services provided by snapshot exist.
+        '''
+        self.trigger.wait_for_service()
+        self.record.wait_for_service()
+
+    def test_write_all(self):
+        '''
+        Wait long enough for memory & duration limits to need to be used
+        '''
+        rospy.sleep(3.0) # Give some time to fill buffers to maximums
+        self._assert_status_valid()
+        filename = self._assert_write_success()
+        self._assert_bag_valid(filename)
+
+    def test_write_advanced(self):
+        '''
+        Test the more advanced features: pausing and resuming, specific write times, and specific topic list.
+        '''
+        # Pause, resume, and pause again so buffer should only contain data from a known time internal
+        self._pause()
+        rospy.sleep(1.5)
+        start = rospy.Time.now()
+        self._resume()
+        rospy.sleep(3.0)
+        self._pause()
+        stop = rospy.Time.now()
+        rospy.sleep(1.0)
+
+        # Write all buffer data, check that only data from resumed interval is present
+        filename = self._assert_write_success()
+        self._assert_bag_valid(filename, start_time=start, stop_time=stop)
+
+        # With recording still paused (same buffer as last write), write only a shorter time range
+        cropped_start = start + rospy.Duration(0.5)
+        cropped_stop = stop - rospy.Duration(1.0)
+        filename = self._assert_write_success(start_time=cropped_start, stop_time=cropped_stop)
+        self._assert_bag_valid(filename, start_time=cropped_start, stop_time=cropped_stop)
+
+        # Write only specific topics and ensure that only those are present in bag file
+        specific_topics = [rospy.resolve_name(topic) for topic in ['/test2', 'test1']]
+        filename = self._assert_write_success(topics=specific_topics)
+        self._assert_bag_valid(filename, topics=specific_topics)
+
+        # Resume recording for other tests
+        self._resume()
+
+    def test_invalid_topics(self):
+        '''
+        Test that an invalid topic or one not subscribed to fails
+        '''
+        self._assert_no_data(['_invalid_graph_name'])
+        self._assert_no_data(['/test4'])
+
+ 
 if __name__ == '__main__':
     import rostest
     PKG='rosbag'

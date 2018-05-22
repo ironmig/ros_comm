@@ -291,7 +291,7 @@ void Snapshoter::writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, strin
             //res.message = string("failed to open bag: ") + err.what();
             return;
         }
-        ROS_INFO("writing snapshot to %s", req.filename.c_str());
+        ROS_INFO("Writing snapshot to %s", req.filename.c_str());
     }
 
     // write queue
@@ -321,21 +321,20 @@ bool Snapshoter::triggerSnapshotCb(rosbag::TriggerSnapshot::Request &req, rosbag
             return true; 
         }
         boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
-        recording_ = false;
+        if (recording_prior)
+            pause();
         writing_ = true;
     }
 
     // Ensure that state is updated when function exits, regardlesss of branch path / exception events
-    BOOST_SCOPE_EXIT(&state_lock_, &writing_, &recording_, recording_prior, this_)
+    BOOST_SCOPE_EXIT(&state_lock_, &writing_, recording_prior, this_)
     {
         // Clear buffers beacuase time gaps (skipped messages) may have occured while paused
-        this_->clear();
         boost::unique_lock<boost::upgrade_mutex> write_lock(state_lock_);
         // Turn off writing flag and return recording to its state before writing
         writing_ = false;
         if (recording_prior)
-            ROS_INFO("Buffering resumed");
-        recording_ = recording_prior;
+            this_->resume();
     } BOOST_SCOPE_EXIT_END
 
     // Create bag
@@ -400,6 +399,19 @@ void Snapshoter::clear()
     }
 }
 
+void Snapshoter::pause()
+{
+    ROS_INFO("Buffering paused");
+    recording_ = false;
+}
+
+void Snapshoter::resume()
+{
+    clear();
+    recording_ = true;
+    ROS_INFO("Buffering resumed and old data cleared.");
+}
+
 bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res)
 {
     boost::upgrade_lock<boost::upgrade_mutex> read_lock(state_lock_);
@@ -413,15 +425,12 @@ bool Snapshoter::recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Re
     if (req.data and not recording_)
     {
         boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
-        clear();
-        ROS_INFO("Buffering resumed");
-        recording_ = true;
+        resume();
     }
     else if (not req.data and recording_)
     {
         boost::upgrade_to_unique_lock<boost::upgrade_mutex> write_lock(read_lock);
-        ROS_INFO("Buffering paused.");
-        recording_ = false;
+        pause();
     }
     res.success = true;
     return true;
