@@ -112,16 +112,26 @@ class TestRosbagSnapshot(unittest.TestCase):
     def _resume(self):
         self._assert_record_success(True)
 
-    def _assert_write_success(self, topics=[], **kwargs):
+    def _assert_write_success(self, topics=[], prefix_mode=False, **kwargs):
         '''
         Asserts that the TriggerWrite services succeeds for the specified request arguments
         and that the specified bag file is actually created
+        @param prefix_mode: If True, don't put .bag at the end of reqest to check prefix filename mode
         '''
-        filename = tempfile.mktemp() + '.bag'
+        if prefix_mode:
+            d = tempfile.mkdtemp()
+            filename = tempfile.mktemp(dir=d)
+        else:
+            filename = tempfile.mktemp(suffix='.bag')
         req = TriggerSnapshotRequest(filename=filename, topics=topics, **kwargs)
         res = self.trigger(req)
         self.assertTrue(res.success, msg="snapshot should have succeeded. message: {}".format(res.message))
         self.assertTrue(res.message == "")
+        if prefix_mode:
+            dircontents = os.listdir(d)
+            self.assertEqual(len(dircontents), 1)
+            filename = os.path.join(d, dircontents[0])
+            self.assertEqual(filename[-4:], '.bag')
         self.assertTrue(os.path.isfile(filename))
         return filename
 
@@ -168,7 +178,7 @@ class TestRosbagSnapshot(unittest.TestCase):
             self.assertEqual(bag_topics, set(topics))
         self.assertTrue(bag_topics.issubset(param_topics))
         for topic in topics_dict:
-            size = topics_dict[topic].message_count * 8
+            size = topics_dict[topic].message_count * 8  # Calculate stored message size as each message is 8 bytes
             gen = bag.read_messages(topics=topic)
             _, _, first_time = gen.next()
             if start_time:
@@ -193,7 +203,7 @@ class TestRosbagSnapshot(unittest.TestCase):
         '''
         rospy.sleep(3.0) # Give some time to fill buffers to maximums
         self._assert_status_valid()
-        filename = self._assert_write_success()
+        filename = self._assert_write_success(prefix_mode=True)
         self._assert_bag_valid(filename)
 
     def test_write_advanced(self):

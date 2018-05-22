@@ -127,9 +127,11 @@ class ROSBAG_DECL MessageQueue
 {
 friend Snapshoter;
 private:
+    // Locks access to size_ and queue_
     boost::mutex lock;
+    // Stores limits on buffer size and duration
     SnapshoterTopicOptions options_;
-    // Current total size of the queue
+    // Current total size of the queue, in bytes
     int64_t size_;
     typedef std::deque<SnapshotMessage> queue_t;
     queue_t queue_;
@@ -145,14 +147,12 @@ public:
     ros::Duration duration() const;
     // Clear internal buffer
     void clear();
-    // Write all buffered contents to bag file
-    void write(Bag& bag);
     // Store the subscriber for this topic's queue internaly so it is not deleted
     void setSubscriber(boost::shared_ptr<ros::Subscriber> sub);
-    // 
+    // Put data about oldest/newest message time, message count, and buffersize into status message
     void fillStatus(rosgraph_msgs::TopicStatistics &status);
-
     typedef std::pair<queue_t::const_iterator, queue_t::const_iterator> range_t;
+    // Get a begin and end iterator into the buffer respecting the start and end timestamp constraints
     range_t rangeFromTimes(ros::Time const&start, ros::Time const& end);
 private:
     // Internal push whitch does not obtain lock
@@ -195,9 +195,9 @@ private:
 
     // Replace individual topic limits with node defaults if they are flagged for it (see SnapshoterTopicOptions)
     void fixTopicOptions(SnapshoterTopicOptions &options);
-    // Clean a requested filename, ensuring .bag is at the end and appending the date TODO make clearer, mention return bool
+    // If file is "prefix" mode (doesn't end in .bag), append current datetime and .bag to end
     bool postfixFilename(std::string& file);
-    // TODO document, implement
+    /// Return current local datetime as a string such as 2018-05-22-14-28-51. Used to generate bag filenames
     std::string timeAsStr();
     // Clear the internal buffers of all topics. Used when resuming after a pause to avoid time gaps
     void clear();
@@ -215,6 +215,7 @@ private:
     void resume();
     // Publish status containing statistics of currently buffered topics and other state
     void publishStatus(ros::TimerEvent const& e);
+    // Write the parts of message_queue within the time constraints of req to the queue
     void writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, std::string const& topic, rosbag::TriggerSnapshot::Request& req);
 };
 
@@ -229,6 +230,7 @@ struct ROSBAG_DECL SnapshoterClientOptions
     Action action_;
     std::vector<std::string> topics_;
     std::string filename_;
+    std::string prefix_;
 };
 
 // TODO document

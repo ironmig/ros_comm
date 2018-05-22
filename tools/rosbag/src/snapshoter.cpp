@@ -37,6 +37,8 @@
 #include <vector>
 #include <boost/foreach.hpp>
 #include <boost/scope_exit.hpp>
+#include <boost/thread/xtime.hpp>
+#include <boost/date_time/local_time/local_time.hpp>
 #include <ros/ros.h>
 #include <ros/assert.h>
 #include <topic_tools/shape_shifter.h>
@@ -226,9 +228,6 @@ bool Snapshoter::postfixFilename(string &file)
 
 string Snapshoter::timeAsStr()
 {
-    // TODO
-    return "2018-05-14";
-    /*
     std::stringstream msg;
     const boost::posix_time::ptime now=
         boost::posix_time::second_clock::local_time();
@@ -237,7 +236,6 @@ string Snapshoter::timeAsStr()
     msg.imbue(std::locale(msg.getloc(),f));
     msg << now;
     return msg.str();
-    */
 }
 
 void Snapshoter::topicCB(const ros::MessageEvent<topic_tools::ShapeShifter const>& msg_event, boost::shared_ptr<MessageQueue> queue)
@@ -252,7 +250,7 @@ void Snapshoter::topicCB(const ros::MessageEvent<topic_tools::ShapeShifter const
     }
 
     // Pack message and metadata into SnapshotMessage holder
-    SnapshotMessage out(msg_event.getMessage(), msg_event.getConnectionHeaderPtr(), Time::now());
+    SnapshotMessage out(msg_event.getMessage(), msg_event.getConnectionHeaderPtr(), msg_event.getReceiptTime());
     queue->push(out);
 }
 
@@ -298,7 +296,7 @@ void Snapshoter::writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, strin
     for (MessageQueue::range_t::first_type msg_it = range.first; msg_it != range.second; ++msg_it)
     {
         SnapshotMessage const& msg = *msg_it;
-        bag.write(topic, msg.time, *msg.msg, msg.connection_header);
+        bag.write(topic, msg.time, msg.msg, msg.connection_header);
     }
 }
 
@@ -447,9 +445,11 @@ void Snapshoter::publishStatus(ros::TimerEvent const& e)
         boost::shared_lock<boost::upgrade_mutex> lock(state_lock_);
         msg.buffering = recording_; // TODO: name consistency. Is it buffering or recording?
     }
+    std::string node_id = ros::this_node::getName();
     BOOST_FOREACH(buffers_t::value_type& pair, buffers_)
     {
         rosgraph_msgs::TopicStatistics status;
+        status.node_sub = node_id;
         status.topic = pair.first;
         pair.second->fillStatus(status);
         msg.topics.push_back(status);
@@ -507,7 +507,22 @@ int SnapshoterClient::run(SnapshoterClientOptions const& opts)
         }
         rosbag::TriggerSnapshotRequest req;
         req.topics = opts.topics_;
-        req.filename = opts.filename_;
+        // Prefix mode
+        if (opts.filename_.empty())
+        {
+            req.filename = opts.prefix_;
+            size_t ind = req.filename.rfind(".bag");
+            if (ind != string::npos && ind == req.filename.size() - 4)
+                req.filename.erase(ind);
+        }
+        // Absolute filename mode 
+        else
+        {
+            req.filename = opts.filename_;
+            size_t ind = req.filename.rfind(".bag");
+            if (ind == string::npos || ind != req.filename.size() - 4)
+                req.filename += ".bag";
+        }
         rosbag::TriggerSnapshotResponse res;
         if (not client.call(req, res))
         {
