@@ -32,7 +32,7 @@ add_library(rosbag
   src/recorder.cpp
   src/snapshoter.cpp
   src/time_translator.cpp)
-add_dependencies(rosbag ${catkin_EXPORTED_TARGETS})
+add_dependencies(rosbag ${catkin_EXPORTED_TARGETS} ${rosbag_EXPORTED_TARGETS})
 
 target_link_libraries(rosbag ${catkin_LIBRARIES} ${Boost_LIBRARIES}
   ${BZIP2_LIBRARIES}

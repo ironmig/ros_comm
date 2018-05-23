@@ -1,7 +1,7 @@
 /*********************************************************************
 * Software License Agreement (BSD License)
 *
-*  Copyright (c) 2008, Willow Garage, Inc.
+*  Copyright (c) 2018, Open Source Robotics Foundation, Inc.
 *  All rights reserved.
 *
 *  Redistribution and use in source and binary forms, with or without
@@ -14,9 +14,9 @@
 *     copyright notice, this list of conditions and the following
 *     disclaimer in the documentation and/or other materials provided
 *     with the distribution.
-*   * Neither the name of Willow Garage, Inc. nor the names of its
-*     contributors may be used to endorse or promote products derived
-*     from this software without specific prior written permission.
+*   * Neither the name of Open Source Robotics Foundation, Inc. nor the
+*     names of its contributors may be used to endorse or promote products
+*     derived from this software without specific prior written permission.
 *
 *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -207,7 +207,7 @@ private:
   // Service callback, write all of part of the internal buffers to a bag file according to request parameters
   bool triggerSnapshotCb(rosbag::TriggerSnapshot::Request& req, rosbag::TriggerSnapshot::Response& res);
   // Service callback, enable or disable recording (storing new messages into queue). Used to pause before writing
-  bool recordCb(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
+  bool enableCB(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
   // Set recording_ to false and do nessesary cleaning, CALLER MUST OBTAIN LOCK
   void pause();
   // Set recording_ to true and do nesessary cleaning, CALLER MUST OBTAIN LOCK
@@ -215,10 +215,12 @@ private:
   // Publish status containing statistics of currently buffered topics and other state
   void publishStatus(ros::TimerEvent const& e);
   // Write the parts of message_queue within the time constraints of req to the queue
-  void writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, std::string const& topic,
-                  rosbag::TriggerSnapshot::Request& req);
+  // If returns false, there was an error opening/writing the bag and an error message was written to res.message
+  bool writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, std::string const& topic,
+                  rosbag::TriggerSnapshot::Request& req, rosbag::TriggerSnapshot::Response& res);
 };
 
+// Configuration for SnapshoterClient
 struct ROSBAG_DECL SnapshoterClientOptions
 {
   SnapshoterClientOptions();
@@ -228,13 +230,17 @@ struct ROSBAG_DECL SnapshoterClientOptions
     PAUSE,
     RESUME
   };
+  // What to do when SnapshoterClient.run is called
   Action action_;
+  // List of topics to write when action_ == TRIGGER_WRITE. If empty, write all buffered topics.
   std::vector<std::string> topics_;
+  // Name of file to write to when action_ == TRIGGER_WRITE, relative to snapshot node. If empty, use prefix
   std::string filename_;
+  // Prefix of the name of file written to when action_ == TRIGGER_WRITE.
   std::string prefix_;
 };
 
-// TODO document
+// Node used to call services which interface with the snapshoter node to trigger write, pause, and resume
 class ROSBAG_DECL SnapshoterClient
 {
 public:
@@ -243,8 +249,6 @@ public:
 
 private:
   ros::NodeHandle nh_;
-  ros::ServiceClient record_client_;
-  ros::ServiceClient trigger_client_;
 };
 
 }  // namespace rosbag

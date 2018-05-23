@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # Software License Agreement (BSD License)
 #
-# Copyright (c) 2008, Willow Garage, Inc.
+# Copyright (c) 2008, Open Source Robotics Foundation, Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -14,9 +14,9 @@
 #    copyright notice, this list of conditions and the following
 #    disclaimer in the documentation and/or other materials provided
 #    with the distribution.
-#  * Neither the name of Willow Garage, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
+#  * Neither the name of Open Source Robotics Foundation, Inc. nor the
+#    names of its contributors may be used to endorse or promote products
+#    derived from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -49,13 +49,12 @@ class TestRosbagSnapshot(unittest.TestCase):
     Relies on the nodes launched in snapshot.test
     '''
     def __init__(self, *args):
-        self.params = rospy.get_param('/snapshot/')
+        self.params = rospy.get_param("snapshot")
         self._parse_params(self.params)
         self.last_status = None
-        self.big_pub = rospy.Publisher("/test3", String, queue_size=5)
-        self.status_sub = rospy.Subscriber('/status', SnapshotStatus, self._status_cb, queue_size=5)
-        self.trigger = rospy.ServiceProxy("/trigger_snapshot", TriggerSnapshot)
-        self.record = rospy.ServiceProxy("/record", SetBool)
+        self.status_sub = rospy.Subscriber("snapshot_status", SnapshotStatus, self._status_cb, queue_size=5)
+        self.trigger = rospy.ServiceProxy("trigger_snapshot", TriggerSnapshot)
+        self.enable = rospy.ServiceProxy("enable_snapshot", SetBool)
         super(TestRosbagSnapshot, self).__init__(*args)
 
     def _parse_params(self, params):
@@ -99,7 +98,7 @@ class TestRosbagSnapshot(unittest.TestCase):
         '''
         Assert that the recording SetBool service responds with success
         '''
-        res = self.record(data)
+        res = self.enable(data)
         self.assertTrue(res.success)
         self.assertEqual(res.message, "")
 
@@ -193,7 +192,7 @@ class TestRosbagSnapshot(unittest.TestCase):
         Check that both services provided by snapshot exist.
         '''
         self.trigger.wait_for_service()
-        self.record.wait_for_service()
+        self.enable.wait_for_service()
 
     def test_write_all(self):
         '''
