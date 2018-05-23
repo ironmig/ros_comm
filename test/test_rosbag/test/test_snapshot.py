@@ -51,14 +51,11 @@ class TestRosbagSnapshot(unittest.TestCase):
     def __init__(self, *args):
         self.params = rospy.get_param('/snapshot/')
         self._parse_params(self.params)
-        #self.pub1 = rospy.Publisher('/test1', Int32, queue_size=10)
-        #self.pub2 = rospy.Publisher('/test2', String, queue_size=10)
         self.last_status = None
         self.big_pub = rospy.Publisher("/test3", String, queue_size=5)
         self.status_sub = rospy.Subscriber('/status', SnapshotStatus, self._status_cb, queue_size=5)
         self.trigger = rospy.ServiceProxy("/trigger_snapshot", TriggerSnapshot)
         self.record = rospy.ServiceProxy("/record", SetBool)
-        
         super(TestRosbagSnapshot, self).__init__(*args)
 
     def _parse_params(self, params):
@@ -70,7 +67,7 @@ class TestRosbagSnapshot(unittest.TestCase):
         self.default_duration_limit = params['default_duration_limit']
         self.default_memory_limit = params['default_memory_limit']
         for topic_obj in self.params['topics']:
-            duration = self.default_duration_limit 
+            duration = self.default_duration_limit
             memory = self.default_memory_limit
             if type(topic_obj) == dict:
                 topic = topic_obj.keys()[0]
@@ -158,7 +155,8 @@ class TestRosbagSnapshot(unittest.TestCase):
         self.assertIsNotNone(self.last_status)  # A message was recieved
         topics = [msg.topic for msg in self.last_status.topics]
         # Oneliners :)
-        status_topics = [rospy.resolve_name(topic.keys()[0] if type(topic) ==dict else topic) for topic in self.params['topics']]
+        status_topics = [rospy.resolve_name(topic.keys()[0] if type(topic) == dict else topic)
+                         for topic in self.params['topics']]
         self.assertEquals(set(topics), set(status_topics))  # Topics from params are same as topics in status message
         for topic in self.last_status.topics:
             duration = topic.window_stop - topic.window_start
@@ -201,7 +199,7 @@ class TestRosbagSnapshot(unittest.TestCase):
         '''
         Wait long enough for memory & duration limits to need to be used
         '''
-        rospy.sleep(3.0) # Give some time to fill buffers to maximums
+        rospy.sleep(3.0)  # Give some time to fill buffers to maximums
         self._assert_status_valid()
         filename = self._assert_write_success(prefix_mode=True)
         self._assert_bag_valid(filename)
@@ -245,9 +243,9 @@ class TestRosbagSnapshot(unittest.TestCase):
         self._assert_no_data(['_invalid_graph_name'])
         self._assert_no_data(['/test4'])
 
- 
+
 if __name__ == '__main__':
     import rostest
-    PKG='rosbag'
+    PKG = 'rosbag'
     rospy.init_node('test_rosbag_snapshot', anonymous=True)
     rostest.run(PKG, 'TestRosbagSnapshot', TestRosbagSnapshot, sys.argv)
