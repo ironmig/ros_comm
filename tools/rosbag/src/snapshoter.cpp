@@ -35,6 +35,7 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <boost/filesystem.hpp>
 #include <boost/foreach.hpp>
 #include <boost/scope_exit.hpp>
 #include <boost/thread/xtime.hpp>
@@ -534,7 +535,6 @@ int SnapshoterClient::run(SnapshoterClientOptions const& opts)
       if (ind != string::npos && ind == req.filename.size() - 4)
         req.filename.erase(ind);
     }
-    // Absolute filename mode
     else
     {
       req.filename = opts.filename_;
@@ -542,6 +542,13 @@ int SnapshoterClient::run(SnapshoterClientOptions const& opts)
       if (ind == string::npos || ind != req.filename.size() - 4)
         req.filename += ".bag";
     }
+
+    // Resolve filename relative to clients working directory to avoid confusion
+    if (req.filename.empty()) // Special case of no specified file, ensure still in working directory of client
+      req.filename = "./";
+    boost::filesystem::path p(boost::filesystem::system_complete(req.filename));
+    req.filename = p.string();
+
     rosbag_msgs::TriggerSnapshotResponse res;
     if (not client.call(req, res))
     {
