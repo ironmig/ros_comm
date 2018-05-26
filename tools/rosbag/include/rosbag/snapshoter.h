@@ -154,8 +154,10 @@ public:
 private:
   // Internal push whitch does not obtain lock
   void _push(SnapshotMessage const& msg);
-  // Internal pop whitch does not obtain lock
+  // Internal pop which does not obtain lock
   SnapshotMessage _pop();
+  // Internal clear which does not obtain lock
+  void _clear();
   // Truncate front of queue as needed to fit a new message of specified size and time. Returns False if this is
   // impossible.
   bool preparePush(int32_t size, ros::Time const& time);

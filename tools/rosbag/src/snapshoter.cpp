@@ -110,6 +110,11 @@ void MessageQueue::fillStatus(rosgraph_msgs::TopicStatistics& status)
 void MessageQueue::clear()
 {
   boost::mutex::scoped_lock l(lock);
+  _clear();
+}
+
+void MessageQueue::_clear()
+{
   queue_.clear();
   size_ = 0;
 }
@@ -124,6 +129,13 @@ ros::Duration MessageQueue::duration() const
 
 bool MessageQueue::preparePush(int32_t size, ros::Time const& time)
 {
+  // If new message is older than back of queue, time has gone backwards and buffer must be cleared
+  if (!queue_.empty() and time < queue_.back().time)
+  {
+    ROS_WARN("Time has gone backwards. Clearing buffer for this topic.");
+    _clear();
+  }
+
   // The only case where message cannot be addded is if size is greater than limit
   if (options_.memory_limit_ > SnapshoterTopicOptions::NO_MEMORY_LIMIT && size > options_.memory_limit_)
     return false;

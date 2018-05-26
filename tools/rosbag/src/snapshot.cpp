@@ -130,7 +130,7 @@ bool parseVariablesMapClient(SnapshoterClientOptions& opts, po::variables_map co
   return true;
 }
 
-/* Read configured topics from by reading ~topics ROS param.
+/* Read configured topics and limits from ROS params
  * TODO: use exceptions instead of asserts to follow style conventions
  * This param should be set in the following (YAML represented) structure
  *   <rosparam>
