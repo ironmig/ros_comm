@@ -64,7 +64,7 @@ bool parseOptions(po::variables_map& vm, int argc, char** argv)
   desc.add_options()
     ("help,h", "produce help message")
     ("trigger-write,t", "Write buffer of selected topcis to a bag file")
-    ("pause,p", "Stop buffering new messages until resumed of write is triggered")
+    ("pause,p", "Stop buffering new messages until resumed or write is triggered")
     ("resume,r", "Resume buffering new messages, writing over older messages as needed")
     ("size,s", po::value<double>()->default_value(-1), "Maximum memory per topic to use in buffering in MB. Default: no limit")
     ("duration,d", po::value<double>()->default_value(30.0), "Maximum difference between newest and oldest buffered message per topic in seconds. Default: 30")
@@ -132,14 +132,7 @@ bool parseVariablesMapClient(SnapshoterClientOptions& opts, po::variables_map co
 
 /* Read configured topics and limits from ROS params
  * TODO: use exceptions instead of asserts to follow style conventions
- * This param should be set in the following (YAML represented) structure
- *   <rosparam>
- *       topics:                   # List of topics
- *           - /topic1             # Topic which will adopt default memory and duration limits
- *           - topic2:             # Topic with overriden memory and duration limit
- *               memory: 5000      # 5000 Byte limit on buffered data from this topic
- *               duration: 30      # 30 second duration limit between newest and oldest message from this topic
- *   </rosparam>
+ * See snapshot.test in test_rosbag for an example
  */
 void appendParamOptions(ros::NodeHandle& nh, SnapshoterOptions& opts)
 {

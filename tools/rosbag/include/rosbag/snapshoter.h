@@ -165,7 +165,7 @@ private:
 
 /* Snapshoter node. Maintains a circular buffer of the most recent messages from configured topics
  * while enforcing limits on memory and duration. The node can be triggered to write some or all
- * of these buffers to a bag file via an action goal. Useful in live testing scenerios where interesting
+ * of these buffers to a bag file via a service call. Useful in live testing scenerios where interesting
  * data may be produced before a user has the oppurtunity to "rosbag record" the data.
  */
 class ROSBAG_DECL Snapshoter

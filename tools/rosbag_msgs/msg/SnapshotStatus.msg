@@ -1,3 +1,5 @@
+# Describes the current status of a running 'rosbag snapshot' node
+
 # Information about the buffer of subscribed topics
 # The period, stamp, node_pub, and dropped_msgs fields are left empty
 rosgraph_msgs/TopicStatistics[] topics
