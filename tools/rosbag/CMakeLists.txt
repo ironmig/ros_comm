@@ -26,7 +26,7 @@ catkin_package(
 add_library(rosbag
   src/player.cpp
   src/recorder.cpp
-  src/snapshoter.cpp
+  src/snapshotter.cpp
   src/time_translator.cpp)
 
 add_dependencies(rosbag ${catkin_EXPORTED_TARGETS})

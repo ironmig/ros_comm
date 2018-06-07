@@ -32,7 +32,7 @@
 *  POSSIBILITY OF SUCH DAMAGE.
 ********************************************************************/
 
-#include "rosbag/snapshoter.h"
+#include "rosbag/snapshotter.h"
 #include "rosbag/exceptions.h"
 
 #include "boost/program_options.hpp"
@@ -41,11 +41,11 @@
 
 namespace po = boost::program_options;
 
-using rosbag::Snapshoter;
-using rosbag::SnapshoterClient;
-using rosbag::SnapshoterOptions;
-using rosbag::SnapshoterTopicOptions;
-using rosbag::SnapshoterClientOptions;
+using rosbag::Snapshotter;
+using rosbag::SnapshotterClient;
+using rosbag::SnapshotterOptions;
+using rosbag::SnapshotterTopicOptions;
+using rosbag::SnapshotterClientOptions;
 
 const int MB_TO_BYTES = 1E6;
 
@@ -98,7 +98,7 @@ bool parseOptions(po::variables_map& vm, int argc, char** argv)
   return true;
 }
 
-bool parseVariablesMap(SnapshoterOptions& opts, po::variables_map const& vm)
+bool parseVariablesMap(SnapshotterOptions& opts, po::variables_map const& vm)
 {
   if (vm.count("topic"))
   {
@@ -111,15 +111,15 @@ bool parseVariablesMap(SnapshoterOptions& opts, po::variables_map const& vm)
   return true;
 }
 
-bool parseVariablesMapClient(SnapshoterClientOptions& opts, po::variables_map const& vm)
+bool parseVariablesMapClient(SnapshotterClientOptions& opts, po::variables_map const& vm)
 {
   if (vm.count("pause"))
-    opts.action_ = SnapshoterClientOptions::PAUSE;
+    opts.action_ = SnapshotterClientOptions::PAUSE;
   else if (vm.count("resume"))
-    opts.action_ = SnapshoterClientOptions::RESUME;
+    opts.action_ = SnapshotterClientOptions::RESUME;
   else if (vm.count("trigger-write"))
   {
-    opts.action_ = SnapshoterClientOptions::TRIGGER_WRITE;
+    opts.action_ = SnapshotterClientOptions::TRIGGER_WRITE;
     if (vm.count("topic"))
       opts.topics_ = vm["topic"].as<std::vector<std::string> >();
     if (vm.count("output-prefix"))
@@ -134,7 +134,7 @@ bool parseVariablesMapClient(SnapshoterClientOptions& opts, po::variables_map co
  * TODO: use exceptions instead of asserts to follow style conventions
  * See snapshot.test in test_rosbag for an example
  */
-void appendParamOptions(ros::NodeHandle& nh, SnapshoterOptions& opts)
+void appendParamOptions(ros::NodeHandle& nh, SnapshotterOptions& opts)
 {
   using XmlRpc::XmlRpcValue;
   XmlRpcValue topics;
@@ -169,8 +169,8 @@ void appendParamOptions(ros::NodeHandle& nh, SnapshoterOptions& opts)
       ROS_ASSERT_MSG(topic_config.getType() == XmlRpcValue::TypeStruct, "Topic limits invalid for: '%s'",
                      topic.c_str());
 
-      ros::Duration dur = SnapshoterTopicOptions::INHERIT_DURATION_LIMIT;
-      int64_t mem = SnapshoterTopicOptions::INHERIT_MEMORY_LIMIT;
+      ros::Duration dur = SnapshotterTopicOptions::INHERIT_DURATION_LIMIT;
+      int64_t mem = SnapshotterTopicOptions::INHERIT_MEMORY_LIMIT;
       std::string duration = "duration";
       std::string memory = "memory";
       if (topic_config.hasMember(duration))
@@ -221,16 +221,16 @@ int main(int argc, char** argv)
   // If any of the client flags are on, use the client
   if (vm.count("trigger-write") || vm.count("pause") || vm.count("resume"))
   {
-    SnapshoterClientOptions opts;
+    SnapshotterClientOptions opts;
     if (!parseVariablesMapClient(opts, vm))
       return 1;
     ros::init(argc, argv, "snapshot_client", ros::init_options::AnonymousName);
-    SnapshoterClient client;
+    SnapshotterClient client;
     return client.run(opts);
   }
 
   // Parse the command-line options
-  SnapshoterOptions opts;
+  SnapshotterOptions opts;
   if (!parseVariablesMap(opts, vm))
     return 1;
 
@@ -246,7 +246,7 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  // Run the snapshoter
-  rosbag::Snapshoter snapshoter(opts);
-  return snapshoter.run();
+  // Run the snapshotter
+  rosbag::Snapshotter snapshotter(opts);
+  return snapshotter.run();
 }

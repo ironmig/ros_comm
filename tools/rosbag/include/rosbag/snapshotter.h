@@ -51,13 +51,13 @@
 
 namespace rosbag
 {
-class ROSBAG_DECL Snapshoter;
+class ROSBAG_DECL Snapshotter;
 
-/* Configuration for a single topic in the Snapshoter node. Holds
+/* Configuration for a single topic in the Snapshotter node. Holds
  * the buffer limits for a topic by duration (time difference between newest and oldest message)
  * and memory usage, in bytes.
  */
-struct ROSBAG_DECL SnapshoterTopicOptions
+struct ROSBAG_DECL SnapshotterTopicOptions
 {
   // When the value of duration_limit_, do not truncate the buffer no matter how large the duration is
   static const ros::Duration NO_DURATION_LIMIT;
@@ -73,14 +73,14 @@ struct ROSBAG_DECL SnapshoterTopicOptions
   // Maximum memory usage of the buffer before older messages ar eremoved
   int32_t memory_limit_;
 
-  SnapshoterTopicOptions(ros::Duration duration_limit = INHERIT_DURATION_LIMIT,
+  SnapshotterTopicOptions(ros::Duration duration_limit = INHERIT_DURATION_LIMIT,
                          int32_t memory_limit = INHERIT_MEMORY_LIMIT);
 };
 
-/* Configuration for the Snapshoter node. Contains default limits for memory and duration
+/* Configuration for the Snapshotter node. Contains default limits for memory and duration
  * and a map of topics to their limits which may override the defaults.
  */
-struct ROSBAG_DECL SnapshoterOptions
+struct ROSBAG_DECL SnapshotterOptions
 {
   // Duration limit to use for a topic's buffer if one is not specified
   ros::Duration default_duration_limit_;
@@ -88,16 +88,16 @@ struct ROSBAG_DECL SnapshoterOptions
   int32_t default_memory_limit_;
   // Period between publishing topic status messages. If <= ros::Duration(0), don't publish status
   ros::Duration status_period_;
-  typedef std::map<std::string, SnapshoterTopicOptions> topics_t;
+  typedef std::map<std::string, SnapshotterTopicOptions> topics_t;
   // Provides list of topics to snapshot and their limit configurations
   topics_t topics_;
 
-  SnapshoterOptions(ros::Duration default_duration_limit = ros::Duration(30), int32_t default_memory_limit = -1,
+  SnapshotterOptions(ros::Duration default_duration_limit = ros::Duration(30), int32_t default_memory_limit = -1,
                     ros::Duration status_period = ros::Duration(1));
 
   // Add a new topic to the configuration
-  void addTopic(std::string const& topic, ros::Duration duration_limit = SnapshoterTopicOptions::INHERIT_DURATION_LIMIT,
-                int32_t memory_limit = SnapshoterTopicOptions::INHERIT_MEMORY_LIMIT);
+  void addTopic(std::string const& topic, ros::Duration duration_limit = SnapshotterTopicOptions::INHERIT_DURATION_LIMIT,
+                int32_t memory_limit = SnapshotterTopicOptions::INHERIT_MEMORY_LIMIT);
 };
 
 /* Stores a buffered message of an ambiguous type and it's associated metadata (time of arrival, connection data),
@@ -119,13 +119,13 @@ struct ROSBAG_DECL SnapshotMessage
  */
 class ROSBAG_DECL MessageQueue
 {
-  friend Snapshoter;
+  friend Snapshotter;
 
 private:
   // Locks access to size_ and queue_
   boost::mutex lock;
   // Stores limits on buffer size and duration
-  SnapshoterTopicOptions options_;
+  SnapshotterTopicOptions options_;
   // Current total size of the queue, in bytes
   int64_t size_;
   typedef std::deque<SnapshotMessage> queue_t;
@@ -134,7 +134,7 @@ private:
   boost::shared_ptr<ros::Subscriber> sub_;
 
 public:
-  MessageQueue(SnapshoterTopicOptions const& options);
+  MessageQueue(SnapshotterTopicOptions const& options);
   // Add a new message to the internal queue if possible, truncating the front of the queue as needed to enforce limits
   void push(SnapshotMessage const& msg);
   // Removes the message at the front of the queue (oldest) and returns it
@@ -163,22 +163,22 @@ private:
   bool preparePush(int32_t size, ros::Time const& time);
 };
 
-/* Snapshoter node. Maintains a circular buffer of the most recent messages from configured topics
+/* Snapshotter node. Maintains a circular buffer of the most recent messages from configured topics
  * while enforcing limits on memory and duration. The node can be triggered to write some or all
  * of these buffers to a bag file via a service call. Useful in live testing scenerios where interesting
  * data may be produced before a user has the oppurtunity to "rosbag record" the data.
  */
-class ROSBAG_DECL Snapshoter
+class ROSBAG_DECL Snapshotter
 {
 public:
-  Snapshoter(SnapshoterOptions const& options);
+  Snapshotter(SnapshotterOptions const& options);
   // Sets up callbacks and spins until node is killed
   int run();
 
 private:
   // Subscribe queue size for each topic
   static const int QUEUE_SIZE;
-  SnapshoterOptions options_;
+  SnapshotterOptions options_;
   typedef std::map<std::string, boost::shared_ptr<MessageQueue> > buffers_t;
   buffers_t buffers_;
   // Locks recording_ and writing_ states.
@@ -193,8 +193,8 @@ private:
   ros::Publisher status_pub_;
   ros::Timer status_timer_;
 
-  // Replace individual topic limits with node defaults if they are flagged for it (see SnapshoterTopicOptions)
-  void fixTopicOptions(SnapshoterTopicOptions& options);
+  // Replace individual topic limits with node defaults if they are flagged for it (see SnapshotterTopicOptions)
+  void fixTopicOptions(SnapshotterTopicOptions& options);
   // If file is "prefix" mode (doesn't end in .bag), append current datetime and .bag to end
   bool postfixFilename(std::string& file);
   /// Return current local datetime as a string such as 2018-05-22-14-28-51. Used to generate bag filenames
@@ -222,17 +222,17 @@ private:
                   rosbag_msgs::TriggerSnapshot::Request& req, rosbag_msgs::TriggerSnapshot::Response& res);
 };
 
-// Configuration for SnapshoterClient
-struct ROSBAG_DECL SnapshoterClientOptions
+// Configuration for SnapshotterClient
+struct ROSBAG_DECL SnapshotterClientOptions
 {
-  SnapshoterClientOptions();
+  SnapshotterClientOptions();
   enum Action
   {
     TRIGGER_WRITE,
     PAUSE,
     RESUME
   };
-  // What to do when SnapshoterClient.run is called
+  // What to do when SnapshotterClient.run is called
   Action action_;
   // List of topics to write when action_ == TRIGGER_WRITE. If empty, write all buffered topics.
   std::vector<std::string> topics_;
@@ -242,12 +242,12 @@ struct ROSBAG_DECL SnapshoterClientOptions
   std::string prefix_;
 };
 
-// Node used to call services which interface with the snapshoter node to trigger write, pause, and resume
-class ROSBAG_DECL SnapshoterClient
+// Node used to call services which interface with the snapshotter node to trigger write, pause, and resume
+class ROSBAG_DECL SnapshotterClient
 {
 public:
-  SnapshoterClient();
-  int run(SnapshoterClientOptions const& opts);
+  SnapshotterClient();
+  int run(SnapshotterClientOptions const& opts);
 
 private:
   ros::NodeHandle nh_;

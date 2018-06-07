@@ -44,7 +44,7 @@
 #include <ros/assert.h>
 #include <topic_tools/shape_shifter.h>
 #include <rosbag_msgs/SnapshotStatus.h>
-#include "rosbag/snapshoter.h"
+#include "rosbag/snapshotter.h"
 
 using std::string;
 using boost::shared_ptr;
@@ -52,17 +52,17 @@ using ros::Time;
 
 namespace rosbag
 {
-const ros::Duration SnapshoterTopicOptions::NO_DURATION_LIMIT = ros::Duration(-1);
-const int32_t SnapshoterTopicOptions::NO_MEMORY_LIMIT = -1;
-const ros::Duration SnapshoterTopicOptions::INHERIT_DURATION_LIMIT = ros::Duration(0);
-const int32_t SnapshoterTopicOptions::INHERIT_MEMORY_LIMIT = 0;
+const ros::Duration SnapshotterTopicOptions::NO_DURATION_LIMIT = ros::Duration(-1);
+const int32_t SnapshotterTopicOptions::NO_MEMORY_LIMIT = -1;
+const ros::Duration SnapshotterTopicOptions::INHERIT_DURATION_LIMIT = ros::Duration(0);
+const int32_t SnapshotterTopicOptions::INHERIT_MEMORY_LIMIT = 0;
 
-SnapshoterTopicOptions::SnapshoterTopicOptions(ros::Duration duration_limit, int32_t memory_limit)
+SnapshotterTopicOptions::SnapshotterTopicOptions(ros::Duration duration_limit, int32_t memory_limit)
   : duration_limit_(duration_limit), memory_limit_(memory_limit)
 {
 }
 
-SnapshoterOptions::SnapshoterOptions(ros::Duration default_duration_limit, int32_t default_memory_limit,
+SnapshotterOptions::SnapshotterOptions(ros::Duration default_duration_limit, int32_t default_memory_limit,
                                      ros::Duration status_period)
   : default_duration_limit_(default_duration_limit)
   , default_memory_limit_(default_memory_limit)
@@ -71,13 +71,13 @@ SnapshoterOptions::SnapshoterOptions(ros::Duration default_duration_limit, int32
 {
 }
 
-void SnapshoterOptions::addTopic(std::string const& topic, ros::Duration duration, int32_t memory)
+void SnapshotterOptions::addTopic(std::string const& topic, ros::Duration duration, int32_t memory)
 {
-  SnapshoterTopicOptions ops(duration, memory);
+  SnapshotterTopicOptions ops(duration, memory);
   topics_.insert(topics_t::value_type(topic, ops));
 }
 
-SnapshoterClientOptions::SnapshoterClientOptions() : action_(SnapshoterClientOptions::TRIGGER_WRITE)
+SnapshotterClientOptions::SnapshotterClientOptions() : action_(SnapshotterClientOptions::TRIGGER_WRITE)
 {
 }
 
@@ -87,7 +87,7 @@ SnapshotMessage::SnapshotMessage(topic_tools::ShapeShifter::ConstPtr _msg,
 {
 }
 
-MessageQueue::MessageQueue(SnapshoterTopicOptions const& options) : options_(options), size_(0)
+MessageQueue::MessageQueue(SnapshotterTopicOptions const& options) : options_(options), size_(0)
 {
 }
 
@@ -137,17 +137,17 @@ bool MessageQueue::preparePush(int32_t size, ros::Time const& time)
   }
 
   // The only case where message cannot be addded is if size is greater than limit
-  if (options_.memory_limit_ > SnapshoterTopicOptions::NO_MEMORY_LIMIT && size > options_.memory_limit_)
+  if (options_.memory_limit_ > SnapshotterTopicOptions::NO_MEMORY_LIMIT && size > options_.memory_limit_)
     return false;
 
   // If memory limit is enforced, remove elements from front of queue until limit would be met once message is added
-  if (options_.memory_limit_ > SnapshoterTopicOptions::NO_MEMORY_LIMIT)
+  if (options_.memory_limit_ > SnapshotterTopicOptions::NO_MEMORY_LIMIT)
     while (queue_.size() != 0 && size_ + size > options_.memory_limit_)
       _pop();
 
   // If duration limit is encforced, remove elements from front of queue until duration limit would be met once message
   // is added
-  if (options_.duration_limit_ > SnapshoterTopicOptions::NO_DURATION_LIMIT && queue_.size() != 0)
+  if (options_.duration_limit_ > SnapshotterTopicOptions::NO_DURATION_LIMIT && queue_.size() != 0)
   {
     ros::Duration dt = time - queue_.front().time;
     while (dt > options_.duration_limit_)
@@ -215,22 +215,22 @@ MessageQueue::range_t MessageQueue::rangeFromTimes(Time const& start, Time const
   return range_t(begin, end);
 }
 
-const int Snapshoter::QUEUE_SIZE = 10;
+const int Snapshotter::QUEUE_SIZE = 10;
 
-Snapshoter::Snapshoter(SnapshoterOptions const& options) : options_(options), recording_(true), writing_(false)
+Snapshotter::Snapshotter(SnapshotterOptions const& options) : options_(options), recording_(true), writing_(false)
 {
   status_pub_ = nh_.advertise<rosbag_msgs::SnapshotStatus>("snapshot_status", 10);
 }
 
-void Snapshoter::fixTopicOptions(SnapshoterTopicOptions& options)
+void Snapshotter::fixTopicOptions(SnapshotterTopicOptions& options)
 {
-  if (options.duration_limit_ == SnapshoterTopicOptions::INHERIT_DURATION_LIMIT)
+  if (options.duration_limit_ == SnapshotterTopicOptions::INHERIT_DURATION_LIMIT)
     options.duration_limit_ = options_.default_duration_limit_;
-  if (options.memory_limit_ == SnapshoterTopicOptions::INHERIT_MEMORY_LIMIT)
+  if (options.memory_limit_ == SnapshotterTopicOptions::INHERIT_MEMORY_LIMIT)
     options.memory_limit_ = options_.default_memory_limit_;
 }
 
-bool Snapshoter::postfixFilename(string& file)
+bool Snapshotter::postfixFilename(string& file)
 {
   size_t ind = file.rfind(".bag");
   // If requested ends in .bag, this is literal name do not append date
@@ -243,7 +243,7 @@ bool Snapshoter::postfixFilename(string& file)
   return true;
 }
 
-string Snapshoter::timeAsStr()
+string Snapshotter::timeAsStr()
 {
   std::stringstream msg;
   const boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
@@ -253,7 +253,7 @@ string Snapshoter::timeAsStr()
   return msg.str();
 }
 
-void Snapshoter::topicCB(const ros::MessageEvent<topic_tools::ShapeShifter const>& msg_event,
+void Snapshotter::topicCB(const ros::MessageEvent<topic_tools::ShapeShifter const>& msg_event,
                          boost::shared_ptr<MessageQueue> queue)
 {
   // If recording is paused (or writing), exit
@@ -270,7 +270,7 @@ void Snapshoter::topicCB(const ros::MessageEvent<topic_tools::ShapeShifter const
   queue->push(out);
 }
 
-void Snapshoter::subscribe(string const& topic, boost::shared_ptr<MessageQueue> queue)
+void Snapshotter::subscribe(string const& topic, boost::shared_ptr<MessageQueue> queue)
 {
   ROS_INFO("Subscribing to %s", topic.c_str());
 
@@ -282,12 +282,12 @@ void Snapshoter::subscribe(string const& topic, boost::shared_ptr<MessageQueue> 
   ops.datatype = ros::message_traits::datatype<topic_tools::ShapeShifter>();
   ops.helper =
       boost::make_shared<ros::SubscriptionCallbackHelperT<const ros::MessageEvent<topic_tools::ShapeShifter const>&> >(
-          boost::bind(&Snapshoter::topicCB, this, _1, queue));
+          boost::bind(&Snapshotter::topicCB, this, _1, queue));
   *sub = nh_.subscribe(ops);
   queue->setSubscriber(sub);
 }
 
-bool Snapshoter::writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, string const& topic,
+bool Snapshotter::writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, string const& topic,
                             rosbag_msgs::TriggerSnapshot::Request& req, rosbag_msgs::TriggerSnapshot::Response& res)
 {
   // acquire lock for this queue
@@ -328,7 +328,7 @@ bool Snapshoter::writeTopic(rosbag::Bag& bag, MessageQueue& message_queue, strin
   return true;
 }
 
-bool Snapshoter::triggerSnapshotCb(rosbag_msgs::TriggerSnapshot::Request& req,
+bool Snapshotter::triggerSnapshotCb(rosbag_msgs::TriggerSnapshot::Request& req,
                                    rosbag_msgs::TriggerSnapshot::Response& res)
 {
   if (not postfixFilename(req.filename))
@@ -421,7 +421,7 @@ bool Snapshoter::triggerSnapshotCb(rosbag_msgs::TriggerSnapshot::Request& req,
   return true;
 }
 
-void Snapshoter::clear()
+void Snapshotter::clear()
 {
   BOOST_FOREACH (buffers_t::value_type& pair, buffers_)
   {
@@ -429,20 +429,20 @@ void Snapshoter::clear()
   }
 }
 
-void Snapshoter::pause()
+void Snapshotter::pause()
 {
   ROS_INFO("Buffering paused");
   recording_ = false;
 }
 
-void Snapshoter::resume()
+void Snapshotter::resume()
 {
   clear();
   recording_ = true;
   ROS_INFO("Buffering resumed and old data cleared.");
 }
 
-bool Snapshoter::enableCB(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res)
+bool Snapshotter::enableCB(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res)
 {
   boost::upgrade_lock<boost::upgrade_mutex> read_lock(state_lock_);
   if (req.data && writing_)  // Cannot enable while writing
@@ -466,7 +466,7 @@ bool Snapshoter::enableCB(std_srvs::SetBool::Request& req, std_srvs::SetBool::Re
   return true;
 }
 
-void Snapshoter::publishStatus(ros::TimerEvent const& e)
+void Snapshotter::publishStatus(ros::TimerEvent const& e)
 {
   (void)e;  // Make your "unused variable" warnings a thing of the past with cast to void!
   // Don't bother doing computing if no one is subscribed
@@ -492,13 +492,13 @@ void Snapshoter::publishStatus(ros::TimerEvent const& e)
   status_pub_.publish(msg);
 }
 
-int Snapshoter::run()
+int Snapshotter::run()
 {
   if (!nh_.ok())
     return 0;
 
   // Create the queue for each topic and set up the subscriber to add to it on new messages
-  BOOST_FOREACH (SnapshoterOptions::topics_t::value_type& pair, options_.topics_)
+  BOOST_FOREACH (SnapshotterOptions::topics_t::value_type& pair, options_.topics_)
   {
     string topic = ros::names::resolve(nh_.getNamespace(), pair.first);
     fixTopicOptions(pair.second);
@@ -510,12 +510,12 @@ int Snapshoter::run()
   }
 
   // Now that subscriptions are setup, setup service servers for writing and pausing
-  trigger_snapshot_server_ = nh_.advertiseService("trigger_snapshot", &Snapshoter::triggerSnapshotCb, this);
-  enable_server_ = nh_.advertiseService("enable_snapshot", &Snapshoter::enableCB, this);
+  trigger_snapshot_server_ = nh_.advertiseService("trigger_snapshot", &Snapshotter::triggerSnapshotCb, this);
+  enable_server_ = nh_.advertiseService("enable_snapshot", &Snapshotter::enableCB, this);
 
   // Start timer to publish status regularly
   if (options_.status_period_ > ros::Duration(0))
-    status_timer_ = nh_.createTimer(options_.status_period_, &Snapshoter::publishStatus, this);
+    status_timer_ = nh_.createTimer(options_.status_period_, &Snapshotter::publishStatus, this);
 
   // Use multiple callback threads
   ros::MultiThreadedSpinner spinner(4);  // Use 4 threads
@@ -523,13 +523,13 @@ int Snapshoter::run()
   return 0;
 }
 
-SnapshoterClient::SnapshoterClient()
+SnapshotterClient::SnapshotterClient()
 {
 }
 
-int SnapshoterClient::run(SnapshoterClientOptions const& opts)
+int SnapshotterClient::run(SnapshotterClientOptions const& opts)
 {
-  if (opts.action_ == SnapshoterClientOptions::TRIGGER_WRITE)
+  if (opts.action_ == SnapshotterClientOptions::TRIGGER_WRITE)
   {
     ros::ServiceClient client = nh_.serviceClient<rosbag_msgs::TriggerSnapshot>("trigger_snapshot");
     if (not client.exists())
@@ -574,7 +574,7 @@ int SnapshoterClient::run(SnapshoterClientOptions const& opts)
     }
     return 0;
   }
-  else if (opts.action_ == SnapshoterClientOptions::PAUSE || opts.action_ == SnapshoterClientOptions::RESUME)
+  else if (opts.action_ == SnapshotterClientOptions::PAUSE || opts.action_ == SnapshotterClientOptions::RESUME)
   {
     ros::ServiceClient client = nh_.serviceClient<std_srvs::SetBool>("enable_snapshot");
     if (not client.exists())
@@ -583,7 +583,7 @@ int SnapshoterClient::run(SnapshoterClientOptions const& opts)
       return 1;
     }
     std_srvs::SetBoolRequest req;
-    req.data = (opts.action_ == SnapshoterClientOptions::RESUME);
+    req.data = (opts.action_ == SnapshotterClientOptions::RESUME);
     std_srvs::SetBoolResponse res;
     if (not client.call(req, res))
     {

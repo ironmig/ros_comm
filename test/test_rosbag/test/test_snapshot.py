@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # Software License Agreement (BSD License)
 #
-# Copyright (c) 2008, Open Source Robotics Foundation, Inc.
+# Copyright (c) 2018, Open Source Robotics Foundation, Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
