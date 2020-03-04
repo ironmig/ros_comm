@@ -50,8 +50,9 @@ import threading
 import time
 import yaml
 
-from Crypto import Random
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
+from Cryptodome.Random import get_random_bytes
+
 import gnupg
 
 try:
@@ -79,8 +80,11 @@ class ROSBagException(Exception):
     """
     Base class for exceptions in rosbag.
     """
-    def __init__(self, value):
+    def __init__(self, value=None):
         self.value = value
+        #fix for #1209. needed in Python 2.7.
+        # For details: https://stackoverflow.com/questions/41808912/cannot-unpickle-exception-subclass
+        self.args = (value,)
 
     def __str__(self):
         return self.value
@@ -96,7 +100,8 @@ class ROSBagUnindexedException(ROSBagException):
     """
     Exception for unindexed bags.
     """
-    def __init__(self):
+    def __init__(self, *args):
+        #*args needed for #1209
         ROSBagException.__init__(self, 'Unindexed bag')
 
 class ROSBagEncryptNotSupportedException(ROSBagException):
@@ -182,12 +187,14 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         super(_ROSBagAesCbcEncryptor, self).__init__()
         # User name of GPG key used for symmetric key encryption
         self._gpg_key_user = None
+        # GPG passphrase
+        self._gpg_passphrase = None
         # Symmetric key for encryption/decryption
         self._symmetric_key = None
         # Encrypted symmetric key
         self._encrypted_symmetric_key = None
 
-    def initialize(self, bag, gpg_key_user):
+    def initialize(self, bag, gpg_key_user, passphrase=None):
         """
         Initialize encryptor by composing AES symmetric key.
         @param bag: bag to be encrypted/decrypted
@@ -197,6 +204,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         @raise ROSBagException: if GPG key user has already been set
         """
         if bag._mode != 'w':
+            self._gpg_passphrase = passphrase or os.getenv('ROSBAG_GPG_PASSPHRASE', None)
             return
         if self._gpg_key_user == gpg_key_user:
             return
@@ -221,7 +229,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         f.seek(chunk_data_pos)
         chunk = _read(f, chunk_size)
         # Encrypt chunk
-        iv = Random.new().read(AES.block_size)
+        iv = get_random_bytes(AES.block_size)
         f.seek(chunk_data_pos)
         f.write(iv)
         cipher = AES.new(self._symmetric_key, AES.MODE_CBC, iv)
@@ -268,7 +276,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         @raise ROSBagFormatException: if GPG key user is not found in header
         """
         try:
-            self._encrypted_symmetric_key = _read_str_field(header, self._ENCRYPTED_KEY_FIELD_NAME)
+            self._encrypted_symmetric_key = _read_bytes_field(header, self._ENCRYPTED_KEY_FIELD_NAME)
         except ROSBagFormatException:
             raise ROSBagFormatException('Encrypted symmetric key is not found in header')
         try:
@@ -276,7 +284,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         except ROSBagFormatException:
             raise ROSBagFormatException('GPG key user is not found in header')
         try:
-            self._symmetric_key = _decrypt_string_gpg(self._encrypted_symmetric_key)
+            self._symmetric_key = _decrypt_string_gpg(self._encrypted_symmetric_key, self._gpg_passphrase)
         except ROSBagFormatException:
             raise
 
@@ -299,7 +307,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
                 v = v.encode()
             header_str += _pack_uint32(len(k) + 1 + len(v)) + k + equal + v
 
-        iv = Random.new().read(AES.block_size)
+        iv = get_random_bytes(AES.block_size)
         enc_str = iv
         cipher = AES.new(self._symmetric_key, AES.MODE_CBC, iv)
         enc_str += cipher.encrypt(_add_padding(header_str))
@@ -345,7 +353,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
     def _build_symmetric_key(self):
         if not self._gpg_key_user:
             return
-        self._symmetric_key = Random.new().read(AES.block_size)
+        self._symmetric_key = get_random_bytes(AES.block_size)
         self._encrypted_symmetric_key = _encrypt_string_gpg(self._gpg_key_user, self._symmetric_key)
 
     def _decrypt_encrypted_header(self, f):
@@ -366,9 +374,10 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         header = cipher.decrypt(encrypted_header)
         return _remove_padding(header)
 
-def _add_padding(input_str):
+def _add_padding(input_bytes):
     # Add PKCS#7 padding to input string
-    return input_str + (AES.block_size - len(input_str) % AES.block_size) * chr(AES.block_size - len(input_str) % AES.block_size)
+    padding_num = AES.block_size - len(input_bytes) % AES.block_size
+    return input_bytes + bytes((padding_num,) * padding_num)
 
 def _remove_padding(input_str):
     # Remove PKCS#7 padding from input string
@@ -381,12 +390,12 @@ def _encrypt_string_gpg(key_user, input):
         raise ROSBagEncryptException('Failed to encrypt bag: {}.  Have you installed a required public key?'.format(enc_data.status))
     return str(enc_data)
 
-def _decrypt_string_gpg(input):
+def _decrypt_string_gpg(input, passphrase=None):
     gpg = gnupg.GPG()
-    dec_data = gpg.decrypt(input, passphrase='clearpath')
+    dec_data = gpg.decrypt(input, passphrase=passphrase)
     if not dec_data.ok:
         raise ROSBagEncryptException('Failed to decrypt bag: {}.  Have you installed a required private key?'.format(dec_data.status))
-    return str(dec_data)
+    return dec_data.data
 
 class Bag(object):
     """
@@ -1044,8 +1053,11 @@ class Bag(object):
 
                     msg_count = 0
                     for connection in connections:
-                        for chunk in self._chunks:
-                            msg_count += chunk.connection_counts.get(connection.id, 0)
+                        if self._chunks:
+                            for chunk in self._chunks:
+                                msg_count += chunk.connection_counts.get(connection.id, 0)
+                        else:
+                            msg_count += len(self._connection_indexes.get(connection.id, []))
                     topic_msg_counts[topic] = msg_count
 
                     if self._connection_indexes_read:
@@ -1243,7 +1255,7 @@ class Bag(object):
                         else:
                            setattr(self, a, DictObject(b) if isinstance(b, dict) else b)
 
-            obj = DictObject(yaml.load(s))
+            obj = DictObject(yaml.safe_load(s))
             try:
                 val = eval('obj.' + key)
             except Exception as ex:
@@ -1291,12 +1303,12 @@ class Bag(object):
 
         return sum((h.uncompressed_size for h in self._chunk_headers.values()))
 
-    def _read_message(self, position, raw=False):
+    def _read_message(self, position, raw=False, return_connection_header=False):
         """
         Read the message from the given position in the file.
         """
         self.flush()
-        return self._reader.seek_and_read_message_data_record(position, raw)
+        return self._reader.seek_and_read_message_data_record(position, raw, return_connection_header)
 
     # Index accessing
 
@@ -1572,6 +1584,12 @@ class Bag(object):
     def _stop_writing(self):
         # Write the open chunk (if any) to file
         self.flush()
+
+        # When read and write operations are mixed (e.g. bags in 'a' mode might be opened in 'r+b' mode)
+        # it could cause problems on Windows:
+        # https://stackoverflow.com/questions/14279658/mixing-read-and-write-on-python-files-in-windows
+        # to fix this, f.seek(0, os.SEEK_CUR) needs to be added after a read() before the next write()
+        self._file.seek(0, os.SEEK_CUR)
 
         # Remember this location as the start of the index
         self._index_data_pos = self._file.tell()
@@ -1910,6 +1928,7 @@ def _read_uint32(f): return _unpack_uint32(f.read(4))
 def _read_uint64(f): return _unpack_uint64(f.read(8))
 def _read_time  (f): return _unpack_time  (f.read(8))
 
+def _decode_bytes(v):  return v
 def _decode_str(v):    return v if type(v) is str else v.decode()
 def _unpack_uint8(v):  return struct.unpack('<B', v)[0]
 def _unpack_uint32(v): return struct.unpack('<L', v)[0]
@@ -1959,6 +1978,7 @@ def _read_field(header, field, unpack_fn):
     
     return value
 
+def _read_bytes_field (header, field): return _read_field(header, field, _decode_bytes)
 def _read_str_field   (header, field): return _read_field(header, field, _decode_str)
 def _read_uint8_field (header, field): return _read_field(header, field, _unpack_uint8)
 def _read_uint32_field(header, field): return _read_field(header, field, _unpack_uint32)
@@ -2052,7 +2072,7 @@ class _BagReader(object):
     def start_reading(self):
         raise NotImplementedError()
 
-    def read_messages(self, topics, start_time, end_time, connection_filter, raw, return_connection_header):
+    def read_messages(self, topics, start_time, end_time, connection_filter, raw, return_connection_header=False):
         raise NotImplementedError()
 
     def reindex(self):
@@ -2117,7 +2137,7 @@ class _BagReader102_Unindexed(_BagReader):
             
             offset = f.tell()
 
-    def read_messages(self, topics, start_time, end_time, topic_filter, raw, return_connection_header):
+    def read_messages(self, topics, start_time, end_time, topic_filter, raw, return_connection_header=False):
         f = self.bag._file
 
         f.seek(self.bag._file_header_pos)
@@ -2355,7 +2375,7 @@ class _BagReader102_Indexed(_BagReader102_Unindexed):
             
         return (topic, topic_index)
 
-    def seek_and_read_message_data_record(self, position, raw):
+    def seek_and_read_message_data_record(self, position, raw, return_connection_header=False):
         f = self.bag._file
 
         # Seek to the message position
@@ -2399,7 +2419,10 @@ class _BagReader102_Indexed(_BagReader102_Unindexed):
             msg = msg_type()
             msg.deserialize(data)
         
-        return BagMessage(topic, msg, t)
+        if return_connection_header:
+            return BagMessageWithConnectionHeader(topic, msg, t, header)
+        else:
+            return BagMessage(topic, msg, t)
 
 class _BagReader200(_BagReader):
     """
@@ -2670,7 +2693,7 @@ class _BagReader200(_BagReader):
 
         self.bag._connection_indexes_read = True
 
-    def read_messages(self, topics, start_time, end_time, connection_filter, raw, return_connection_header):
+    def read_messages(self, topics, start_time, end_time, connection_filter, raw, return_connection_header=False):
         connections = self.bag._get_connections(topics, connection_filter)
         for entry in self.bag._get_entries(connections, start_time, end_time):
             yield self.seek_and_read_message_data_record((entry.chunk_pos, entry.offset), raw, return_connection_header)
@@ -2774,7 +2797,7 @@ class _BagReader200(_BagReader):
 
         return (connection_id, index)
 
-    def seek_and_read_message_data_record(self, position, raw, return_connection_header):
+    def seek_and_read_message_data_record(self, position, raw, return_connection_header=False):
         chunk_pos, offset = position
 
         chunk_header = self.bag._chunk_headers.get(chunk_pos)

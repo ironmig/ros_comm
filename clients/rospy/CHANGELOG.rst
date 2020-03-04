@@ -2,6 +2,15 @@
 Changelog for package rospy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.14.3 (2018-08-06)
+-------------------
+* maintain exception info in RosOutHandler (`#1442 <https://github.com/ros/ros_comm/issues/1442>`_)
+
+1.14.2 (2018-06-06)
+-------------------
+* fix some errors in some probably not frequented code paths (`#1415 <https://github.com/ros/ros_comm/issues/1415>`_)
+* fix thread problem with get_topics() (`#1416 <https://github.com/ros/ros_comm/issues/1416>`_)
+
 1.14.1 (2018-05-21)
 -------------------
 

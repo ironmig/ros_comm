@@ -259,7 +259,7 @@ class LoggingIdentical(object):
         - caller_id (str): Id to identify the caller
         - msg (str): Contents of message to log
         """
-        msg_hash = md5(msg).hexdigest()
+        msg_hash = md5(msg.encode()).hexdigest()
 
         if msg_hash != self.last_logging_msg_table.get(caller_id):
             self.last_logging_msg_table[caller_id] = msg_hash
@@ -605,7 +605,7 @@ def signal_shutdown(reason):
 def _ros_signal(sig, stackframe):
     signal_shutdown("signal-"+str(sig))
     prev_handler = _signalChain.get(sig, None)
-    if prev_handler is not None and not type(prev_handler) == int:
+    if callable(prev_handler):
         try:
             prev_handler(sig, stackframe)
         except KeyboardInterrupt:

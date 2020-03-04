@@ -316,13 +316,6 @@ void start()
     }
   }
 
-#ifdef _MSC_VER
-  if (env_ipv6)
-  {
-    free(env_ipv6);
-  }
-#endif
-
   param::param("/tcp_keepalive", TransportTCP::s_use_keepalive_, TransportTCP::s_use_keepalive_);
 
   PollManager::instance()->addPollThreadListener(checkForShutdown);
@@ -430,6 +423,13 @@ void check_ipv6_environment() {
   bool use_ipv6 = (env_ipv6 && strcmp(env_ipv6,"on") == 0);
   TransportTCP::s_use_ipv6_ = use_ipv6;
   XmlRpc::XmlRpcSocket::s_use_ipv6_ = use_ipv6;
+
+#ifdef _MSC_VER
+  if (env_ipv6)
+  {
+    free(env_ipv6);
+  }
+#endif
 }
 
 void init(const M_string& remappings, const std::string& name, uint32_t options)
@@ -454,6 +454,9 @@ void init(const M_string& remappings, const std::string& name, uint32_t options)
     // Disable SIGPIPE
 #ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
+#else
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 0), &wsaData);
 #endif
     check_ipv6_environment();
     network::init(remappings);
@@ -592,7 +595,8 @@ void shutdown()
   {
     g_internal_queue_thread.join();
   }
-
+  //ros::console::deregister_appender(g_rosout_appender);
+  delete g_rosout_appender;
   g_rosout_appender = 0;
 
   if (g_started)
@@ -603,8 +607,6 @@ void shutdown()
     ConnectionManager::instance()->shutdown();
     XMLRPCManager::instance()->shutdown();
   }
-
-  WallTime end = WallTime::now();
 
   g_started = false;
   g_ok = false;

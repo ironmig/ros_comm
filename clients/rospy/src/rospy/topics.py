@@ -1264,7 +1264,7 @@ class _TopicManager(object):
             rmap = self.subs
             impl_class = _SubscriberImpl
         else:
-            raise TypeError("invalid reg_type: %s"%s)
+            raise TypeError("invalid reg_type: %s"%reg_type)
         with self.lock:
             impl = rmap.get(resolved_name, None)            
             if not impl:
@@ -1348,7 +1348,7 @@ class _TopicManager(object):
         @return: list of topic names this node subscribes to/publishes
         @rtype: [str]
         """                
-        return self.topics
+        return self.topics.copy()
     
     def _get_list(self, rmap):
         return [[k, v.type] for k, v in rmap.items()]

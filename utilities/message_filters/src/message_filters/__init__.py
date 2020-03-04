@@ -33,6 +33,7 @@ Message Filter Objects
 import itertools
 import threading
 import rospy
+from functools import reduce
 
 
 class SimpleFilter(object):
@@ -156,11 +157,15 @@ class Cache(SimpleFilter):
             return None
         return older[-1]
 
-    def getLastestTime(self):
+    def getLatestTime(self):
         """Return the newest recorded timestamp."""
         if not self.cache_times:
             return None
         return self.cache_times[-1]
+
+    def getLastestTime(self):
+        """Return the newest recorded timestamp (equivalent to `getLatestTime()`, but included for backwards compatibility)."""
+        return self.getLatestTime()
 
     def getOldestTime(self):
         """Return the oldest recorded timestamp."""
@@ -239,6 +244,7 @@ class ApproximateTimeSynchronizer(TimeSynchronizer):
         TimeSynchronizer.__init__(self, fs, queue_size)
         self.slop = rospy.Duration.from_sec(slop)
         self.allow_headerless = allow_headerless
+        self.last_added = rospy.Time()
 
     def add(self, msg, my_queue, my_queue_index=None):
         if not hasattr(msg, 'header') or not hasattr(msg.header, 'stamp'):
@@ -253,6 +259,15 @@ class ApproximateTimeSynchronizer(TimeSynchronizer):
 
         self.lock.acquire()
         my_queue[stamp] = msg
+
+        # clear all buffers if jump backwards in time is detected
+        now = rospy.Time.now()
+        if now < self.last_added:
+            rospy.loginfo("ApproximateTimeSynchronizer: Detected jump back in time. Clearing buffer.")
+            for q in self.queues:
+                q.clear()
+        self.last_added = now
+
         while len(my_queue) > self.queue_size:
             del my_queue[min(my_queue)]
         # self.queues = [topic_0 {stamp: msg}, topic_1 {stamp: msg}, ...]
@@ -275,7 +290,7 @@ class ApproximateTimeSynchronizer(TimeSynchronizer):
                 return
             topic_stamps = sorted(topic_stamps, key=lambda x: x[1])
             stamps.append(topic_stamps)
-        for vv in itertools.product(*[zip(*s)[0] for s in stamps]):
+        for vv in itertools.product(*[next(iter(zip(*s))) for s in stamps]):
             vv = list(vv)
             # insert the new message
             if my_queue_index is not None:

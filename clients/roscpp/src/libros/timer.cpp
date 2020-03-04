@@ -42,7 +42,17 @@ Timer::Impl::~Impl()
   stop();
 }
 
+bool Timer::Impl::hasStarted() const
+{
+  return started_;
+}
+
 bool Timer::Impl::isValid()
+{
+  return !period_.isZero();
+}
+
+bool Timer::Impl::isValid() const
 {
   return !period_.isZero();
 }
